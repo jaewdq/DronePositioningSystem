@@ -1,0 +1,176 @@
+lidar_drone_tracker:
+  ros__parameters:
+
+    # ---------------------------------------------------------------
+    # LiDAR physical poses in Gazebo world frame (ENU, Z-up)
+    #
+    # Field center in world frame: x=15.0, y=10.0
+    # Exclusion zone (33x23m): forbidden if |x-15|<16.5 AND |y-10|<11.5
+    #   → forbidden region: x in (-1.5, 31.5) AND y in (-1.5, 21.5)
+    #
+    # IMPORTANT: these poses MUST match the LIDARS list in
+    #   Tools/simulation/gz/worlds/generate_competition_map.py
+    # (the world spawns the sensors; this node transforms their clouds
+    #  to world frame using exactly these poses).
+    #
+    # Two LiDARs sit at OPPOSITE DIAGONAL CORNERS of the field (just outside
+    # the exclusion zone). Coverage calc: the field diagonal (36m) exceeds the
+    # 35m range, so one LiDAR alone can't see the far corner — but the two
+    # together cover 100% of the 30x20 area, with ~95% seen by BOTH (good
+    # triangulation).
+    # Height 1.5m: the LiDAR is 2.12m (horizontal) from the landpad, and to
+    # see a ground point (z=0) within the ±45° cone you need d>=h. h=1.5<2.12
+    # so the drone is trackable from the ground up (z=0 → 35° downward angle,
+    # ~20° margin). The drone (2m) is viewed slightly from below → always
+    # against an empty-sky background (clean segmentation). Altitude-change
+    # sensitivity is identical to h=2.0 (it depends on range, not LiDAR height).
+    #
+    # topic = <sensor topic>/points  (gpu_lidar appends /points for the 3D cloud)
+    #
+    # The Ouster OS0-SR is a 360° full-scan LiDAR, so yaw does NOT affect
+    # coverage — it only has to match the world SDF value.
+    # ---------------------------------------------------------------
+
+    # --- LiDAR 1: landpad corner (south-west), facing field center ---
+    lidar1_topic: "/ouster1/points"
+    lidar1_x:     -1.5
+    lidar1_y:     -1.5
+    lidar1_z:      1.5
+    lidar1_roll:   0.0
+    lidar1_pitch:  0.0
+    lidar1_yaw:    0.6094     # faces field center (15,10) from SW corner
+
+    # --- LiDAR 2: diagonal corner (north-east), facing field center ---
+    # Set enable_lidar2: false to run with LiDAR 1 only.
+    enable_lidar2: true
+    lidar2_topic: "/ouster2/points"
+    lidar2_x:     31.5
+    lidar2_y:     21.5
+    lidar2_z:      1.5
+    lidar2_roll:   0.0
+    lidar2_pitch:  0.0
+    lidar2_yaw:   -2.5322     # faces field center (15,10) from NE corner
+
+    # Max age (s) of a sensor's buffered cloud before it is dropped from
+    # fusion. 0.25s = 2.5× the 10Hz frame period → tolerates one lost frame.
+    buffer_stale_timeout: 0.25
+
+    # ---------------------------------------------------------------
+    # Voxel downsampling
+    # ---------------------------------------------------------------
+    # 5cm leaf: preserves shape detail on 50cm drone while reducing
+    # raw 65536-point cloud (~99% of ground plane) to manageable size
+    voxel_leaf_size: 0.05
+
+    # ---------------------------------------------------------------
+    # ROI filter (world frame, with 2m margin beyond 30x20 field)
+    # ---------------------------------------------------------------
+    roi_x_min: -2.0
+    roi_x_max: 32.0
+    roi_y_min: -2.0
+    roi_y_max: 22.0
+    roi_z_min:  0.0
+    roi_z_max:  6.0
+
+    # ---------------------------------------------------------------
+    # RANSAC ground plane removal
+    #
+    # distance_threshold=5cm: thick enough to capture the grid-line
+    # decals painted on the floor (effectively z≈0), slim enough to
+    # exclude the drone at ≥0.5m.
+    #
+    # ground_inlier_min_ratio=20%: RANSAC must claim at least 20% of
+    # post-ROI points as inliers before we trust it as "the ground".
+    # Prevents accidentally removing a false-positive plane through
+    # the drone body or a clustered rain artifact.
+    # ---------------------------------------------------------------
+    ransac_distance_threshold: 0.05
+    ransac_max_iterations:     100
+    ground_inlier_min_ratio:   0.20
+
+    # ---------------------------------------------------------------
+    # Statistical outlier removal  (rain / scatter noise suppression)
+    #
+    # scatter_ratio=0.3 in the rain emitter means ~30% of rays scatter.
+    # SOR with mean_k=20 and std_ratio=2.0 removes points whose average
+    # distance to 20 neighbours is more than 2 standard deviations above
+    # the scene mean — reliable for suppressing isolated rain droplets
+    # without losing the drone cluster (which is spatially compact).
+    # ---------------------------------------------------------------
+    sor_mean_k:    20
+    sor_std_ratio:  2.0
+
+    # ---------------------------------------------------------------
+    # DBSCAN clustering  (equivalent to PCL EuclideanClusterExtraction)
+    #
+    # eps=40cm: max inter-point distance within a cluster. At 20-30m the
+    #   drone's few hits are spread across its 0.5m body (~0.1-0.4m apart),
+    #   so 25cm was too tight to chain them — 40cm reliably links them while
+    #   still well below the spacing to any other object in the open field.
+    # min_points=2: at long range a single LiDAR yields only 2-4 hits on the
+    #   50cm drone. 3 was dropping detections intermittently; 2 recovers them.
+    #   (False 2-point noise clusters are rejected by the height filter and
+    #    the nearest-to-track selection.)
+    # max_points=400: drone at closest approach rarely exceeds this.
+    # ---------------------------------------------------------------
+    cluster_tolerance:  0.40
+    cluster_min_points: 2
+    cluster_max_points: 400
+
+    # ---------------------------------------------------------------
+    # Drone height validity range (world frame Z)
+    #
+    # min_drone_height=0.05m: low enough to recognise the drone SITTING ON
+    #   the pad (centroid ~0.15m) from the very start, not just once airborne.
+    #   Ground-fixed obstacles are rejected instead by the home-seed +
+    #   nearest-to-track selection + association gate below.
+    # ---------------------------------------------------------------
+    min_drone_height: 0.05
+    max_drone_height: 5.5
+
+    # ---------------------------------------------------------------
+    # Home-seed + association gate
+    #
+    # The drone always starts on a known pad (0,0). Seeding the EKF there
+    # locks tracking from the ground and makes selection prefer the pad
+    # cluster; max_assoc_dist rejects any cluster farther than 3m from the
+    # prediction (stops the airborne track snapping onto a ground residual).
+    # ---------------------------------------------------------------
+    seed_at_home: true
+    home_x: 0.0
+    home_y: 0.0
+    home_z: 0.15
+    # 1.5m gate: an airborne drone (z=2) has a ground residual ~1.9m below it
+    # (esp. over grid lines during line-tracing). A 3m gate let the track snap
+    # DOWN onto that residual; 1.5m rejects it → the EKF coasts at altitude and
+    # re-acquires the real drone instead of falling to the floor. Still large
+    # enough to re-lock after a 1.5s coast (drone moves ~1.1m).
+    max_assoc_dist: 1.5
+
+    # ---------------------------------------------------------------
+    # EKF noise parameters
+    #
+    # proc_noise_pos: position can shift ~5cm between frames (10Hz).
+    #   Accounts for model error in constant-velocity assumption.
+    # proc_noise_vel: velocity can change ~0.3m/s per frame (≈3m/s²
+    #   acceleration), tuned to drone's typical manoeuvre envelope.
+    #
+    # meas_noise_pos=15cm: composed of
+    #   • raw LiDAR range noise:       0.8cm (gaussian, per-point)
+    #   • centroid estimation error:   ~5–15cm (sparse side-view cluster)
+    #   Conservative value to keep the EKF from over-trusting noisy
+    #   centroids when the drone is partially occluded.
+    # ---------------------------------------------------------------
+    proc_noise_pos: 0.05
+    proc_noise_vel: 0.30
+    meas_noise_pos: 0.15
+
+    # ---------------------------------------------------------------
+    # Coasting (pure-predict when no cluster detected)
+    # 15 frames = 1.5s at 10Hz. At long range detection is intermittent
+    # (few points), so the EKF must bridge short gaps with constant-velocity
+    # prediction instead of declaring LOST every half second.
+    # ---------------------------------------------------------------
+    coast_max_frames: 15
+
+    lidar_update_rate: 10.0

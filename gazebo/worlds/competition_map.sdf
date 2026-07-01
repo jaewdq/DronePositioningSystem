@@ -1,0 +1,527 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <world name="competition_map">
+    <!--
+      격자 교차점 전체 좌표 (X x Y, m), 원점(0,0)=이착륙 지점:
+        x=0.0: (0.0,0.0), (0.0,4.0), (0.0,8.0), (0.0,12.0), (0.0,16.0), (0.0,20.0)
+        x=4.2857: (4.2857,0.0), (4.2857,4.0), (4.2857,8.0), (4.2857,12.0), (4.2857,16.0), (4.2857,20.0)
+        x=8.5714: (8.5714,0.0), (8.5714,4.0), (8.5714,8.0), (8.5714,12.0), (8.5714,16.0), (8.5714,20.0)
+        x=12.8571: (12.8571,0.0), (12.8571,4.0), (12.8571,8.0), (12.8571,12.0), (12.8571,16.0), (12.8571,20.0)
+        x=17.1429: (17.1429,0.0), (17.1429,4.0), (17.1429,8.0), (17.1429,12.0), (17.1429,16.0), (17.1429,20.0)
+        x=21.4286: (21.4286,0.0), (21.4286,4.0), (21.4286,8.0), (21.4286,12.0), (21.4286,16.0), (21.4286,20.0)
+        x=25.7143: (25.7143,0.0), (25.7143,4.0), (25.7143,8.0), (25.7143,12.0), (25.7143,16.0), (25.7143,20.0)
+        x=30.0: (30.0,0.0), (30.0,4.0), (30.0,8.0), (30.0,12.0), (30.0,16.0), (30.0,20.0)
+
+      마커(경로점) 배치 좌표:
+        id=1: (4.2857, 4.0)
+        id=2: (4.2857, 16.0)
+        id=3: (25.7143, 4.0)
+        id=4: (12.8571, 12.0)
+    -->
+
+    <physics type="ode">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+      <real_time_update_rate>250</real_time_update_rate>
+    </physics>
+    <gravity>0 0 -9.8</gravity>
+    <magnetic_field>6e-06 2.3e-05 -4.2e-05</magnetic_field>
+    <atmosphere type="adiabatic"/>
+
+    <scene>
+      <grid>false</grid>
+      <ambient>0.4 0.4 0.4 1</ambient>
+      <background>0.7 0.7 0.7 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <!-- 바닥: 임무구역과 대비되는 밝은 회색 바닥 -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <surface>
+            <friction><ode/></friction>
+            <bounce/>
+            <contact/>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>200 200</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.85 0.85 0.83 1</ambient>
+            <diffuse>0.85 0.85 0.83 1</diffuse>
+            <specular>0.2 0.2 0.2 1</specular>
+          </material>
+        </visual>
+        <pose>0 0 0 0 -0 0</pose>
+        <inertial>
+          <pose>0 0 0 0 -0 0</pose>
+          <mass>1</mass>
+          <inertia>
+            <ixx>1</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>1</iyy><iyz>0</iyz><izz>1</izz>
+          </inertia>
+        </inertial>
+        <enable_wind>false</enable_wind>
+      </link>
+      <pose>0 0 0 0 -0 0</pose>
+      <self_collide>false</self_collide>
+    </model>
+
+    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드 -->
+    <model name="home_pad">
+      <static>true</static>
+      <pose>0 0 0.0015 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.5</radius><length>0.001</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.1 0.7 0.2 1</ambient>
+            <diffuse>0.1 0.7 0.2 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 격자 구획선: 폭 0.1m, X 7칸 x 4.2857m, Y 5칸 x 4.0000m -->
+
+    <model name="gridline_v_1">
+      <static>true</static>
+      <pose>0.0 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_2">
+      <static>true</static>
+      <pose>4.2857 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_3">
+      <static>true</static>
+      <pose>8.5714 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_4">
+      <static>true</static>
+      <pose>12.8571 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_5">
+      <static>true</static>
+      <pose>17.1429 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_6">
+      <static>true</static>
+      <pose>21.4286 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_7">
+      <static>true</static>
+      <pose>25.7143 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_v_8">
+      <static>true</static>
+      <pose>30.0 10.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>0.1 20.0 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_9">
+      <static>true</static>
+      <pose>15.0 0.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_10">
+      <static>true</static>
+      <pose>15.0 4.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_11">
+      <static>true</static>
+      <pose>15.0 8.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_12">
+      <static>true</static>
+      <pose>15.0 12.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_13">
+      <static>true</static>
+      <pose>15.0 16.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_14">
+      <static>true</static>
+      <pose>15.0 20.0 0.001 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>30.0 0.1 0.001</size></box>
+          </geometry>
+          <material>
+            <ambient>0.02 0.02 0.02 1</ambient>
+            <diffuse>0.02 0.02 0.02 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 경로점 ArUco 마커 4개 (DICT_4X4_50, 0.5m x 0.5m), 경계에서 1셀 이상 안쪽 -->
+
+    <!-- 경로점 id=1: (4.2857, 4.0) -->
+    <include>
+      <uri>model://aruco_marker_id1_at_x4_y4</uri>
+      <name>aruco_marker_id1_at_x4_y4</name>
+      <pose>4.2857 4.0 0.002 0 0 0</pose>
+    </include>
+    <!-- 경로점 id=2: (4.2857, 16.0) -->
+    <include>
+      <uri>model://aruco_marker_id2_at_x4_y16</uri>
+      <name>aruco_marker_id2_at_x4_y16</name>
+      <pose>4.2857 16.0 0.002 0 0 0</pose>
+    </include>
+    <!-- 경로점 id=3: (25.7143, 4.0) -->
+    <include>
+      <uri>model://aruco_marker_id3_at_x26_y4</uri>
+      <name>aruco_marker_id3_at_x26_y4</name>
+      <pose>25.7143 4.0 0.002 0 0 0</pose>
+    </include>
+    <!-- 경로점 id=4: (12.8571, 12.0) -->
+    <include>
+      <uri>model://aruco_marker_id4_at_x13_y12</uri>
+      <name>aruco_marker_id4_at_x13_y12</name>
+      <pose>12.8571 12.0 0.002 0 0 0</pose>
+    </include>
+
+    <!-- 지상 고정 LiDAR 2대 (측위용, 33x23 금지구역 밖, 동쪽+북쪽 직교 배치) -->
+
+    <!-- 지상 고정 LiDAR: ground_lidar_1 @ world (-1.5, -1.5, 1.5), yaw=0.6094 rad, topic /ouster1/points -->
+    <model name="ground_lidar_1">
+      <static>true</static>
+      <pose>-1.5 -1.5 1.5 0.0 0.0 0.6094</pose>
+      <link name="base">
+        <visual name="pole">
+          <pose>0 0 -0.75 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.04</radius><length>1.5</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.15 0.15 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
+          </material>
+        </visual>
+        <visual name="housing">
+          <geometry>
+            <cylinder><radius>0.09</radius><length>0.16</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.9 0.45 0.05 1</ambient>
+            <diffuse>1.0 0.5 0.05 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+            <emissive>0.3 0.15 0.0 1</emissive>
+          </material>
+        </visual>
+        <visual name="cap">
+          <pose>0 0 0.09 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.07</radius><length>0.02</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.85 1</ambient>
+            <diffuse>0.9 0.9 0.95 1</diffuse>
+          </material>
+        </visual>
+        <sensor name="ground_lidar_1_lidar" type="gpu_lidar">
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <topic>/ouster1</topic>
+          <gz_frame_id>ground_lidar_1_frame</gz_frame_id>
+          <visualize>true</visualize>
+          <lidar>
+            <scan>
+              <horizontal>
+                <samples>1024</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265358979</min_angle>
+                <max_angle>3.14159265358979</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>64</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.79234</min_angle>
+                <max_angle>0.79234</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.3</min>
+              <max>35.0</max>
+              <resolution>0.001</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.008</stddev>
+            </noise>
+          </lidar>
+        </sensor>
+      </link>
+    </model>
+    <!-- 지상 고정 LiDAR: ground_lidar_2 @ world (31.5, 21.5, 1.5), yaw=-2.5322 rad, topic /ouster2/points -->
+    <model name="ground_lidar_2">
+      <static>true</static>
+      <pose>31.5 21.5 1.5 0.0 0.0 -2.5322</pose>
+      <link name="base">
+        <visual name="pole">
+          <pose>0 0 -0.75 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.04</radius><length>1.5</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.15 0.15 0.15 1</ambient>
+            <diffuse>0.25 0.25 0.25 1</diffuse>
+          </material>
+        </visual>
+        <visual name="housing">
+          <geometry>
+            <cylinder><radius>0.09</radius><length>0.16</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.9 0.45 0.05 1</ambient>
+            <diffuse>1.0 0.5 0.05 1</diffuse>
+            <specular>0.3 0.3 0.3 1</specular>
+            <emissive>0.3 0.15 0.0 1</emissive>
+          </material>
+        </visual>
+        <visual name="cap">
+          <pose>0 0 0.09 0 0 0</pose>
+          <geometry>
+            <cylinder><radius>0.07</radius><length>0.02</length></cylinder>
+          </geometry>
+          <material>
+            <ambient>0.8 0.8 0.85 1</ambient>
+            <diffuse>0.9 0.9 0.95 1</diffuse>
+          </material>
+        </visual>
+        <sensor name="ground_lidar_2_lidar" type="gpu_lidar">
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <topic>/ouster2</topic>
+          <gz_frame_id>ground_lidar_2_frame</gz_frame_id>
+          <visualize>true</visualize>
+          <lidar>
+            <scan>
+              <horizontal>
+                <samples>1024</samples>
+                <resolution>1</resolution>
+                <min_angle>-3.14159265358979</min_angle>
+                <max_angle>3.14159265358979</max_angle>
+              </horizontal>
+              <vertical>
+                <samples>64</samples>
+                <resolution>1</resolution>
+                <min_angle>-0.79234</min_angle>
+                <max_angle>0.79234</max_angle>
+              </vertical>
+            </scan>
+            <range>
+              <min>0.3</min>
+              <max>35.0</max>
+              <resolution>0.001</resolution>
+            </range>
+            <noise>
+              <type>gaussian</type>
+              <mean>0.0</mean>
+              <stddev>0.008</stddev>
+            </noise>
+          </lidar>
+        </sensor>
+      </link>
+    </model>
+
+    <light name="sunUTC" type="directional">
+      <pose>0 0 500 0 -0 0</pose>
+      <cast_shadows>true</cast_shadows>
+      <intensity>1</intensity>
+      <direction>0.001 0.625 -0.78</direction>
+      <diffuse>0.904 0.904 0.904 1</diffuse>
+      <specular>0.271 0.271 0.271 1</specular>
+      <attenuation>
+        <range>2000</range>
+        <linear>0</linear>
+        <constant>1</constant>
+        <quadratic>0</quadratic>
+      </attenuation>
+      <spot>
+        <inner_angle>0</inner_angle>
+        <outer_angle>0</outer_angle>
+        <falloff>0</falloff>
+      </spot>
+    </light>
+
+    <spherical_coordinates>
+      <surface_model>EARTH_WGS84</surface_model>
+      <world_frame_orientation>ENU</world_frame_orientation>
+      <latitude_deg>47.397971057728974</latitude_deg>
+      <longitude_deg>8.546163739800146</longitude_deg>
+      <elevation>0</elevation>
+    </spherical_coordinates>
+  </world>
+</sdf>

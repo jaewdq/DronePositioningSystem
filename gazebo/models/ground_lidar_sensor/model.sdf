@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sdf version="1.9">
+  <model name="ground_lidar_sensor">
+    <!-- Static stand: position set externally at spawn time -->
+    <static>true</static>
+
+    <link name="base">
+      <!-- Support pole from ground up to the sensor.
+           Model origin sits at the sensor height (spawn z), so the pole
+           is centred half its length below the origin to reach the floor.
+           For the default spawn z=2.5, length 2.5 → spans floor(0)→sensor. -->
+      <visual name="pole">
+        <pose>0 0 -1.25 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.04</radius>
+            <length>2.5</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.15 0.15 0.15 1</ambient>
+          <diffuse>0.25 0.25 0.25 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- LiDAR housing: bright orange cylinder, clearly visible in the GUI -->
+      <visual name="housing">
+        <geometry>
+          <cylinder>
+            <radius>0.09</radius>
+            <length>0.16</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.9 0.45 0.05 1</ambient>
+          <diffuse>1.0 0.5 0.05 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+          <emissive>0.3 0.15 0.0 1</emissive>
+        </material>
+      </visual>
+
+      <!-- Small white cap on top to indicate the scan optics -->
+      <visual name="cap">
+        <pose>0 0 0.09 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <radius>0.07</radius>
+            <length>0.02</length>
+          </cylinder>
+        </geometry>
+        <material>
+          <ambient>0.8 0.8 0.85 1</ambient>
+          <diffuse>0.9 0.9 0.95 1</diffuse>
+        </material>
+      </visual>
+
+      <!--
+        Ouster OS0-SR 64-channel equivalent
+        Horizontal: 360°, 1024 samples
+        Vertical:   ±45.4° (90.8° FOV), 64 channels → ~1.42° step
+        Range:      0.3 – 35 m
+        Rate:       10 Hz
+        Noise:      Gaussian σ = 0.008 m (0.8 cm)
+
+        IMPORTANT: a gpu_lidar sensor publishes TWO gz topics derived from
+        <topic>:
+          <topic>            → gz.msgs.LaserScan        (2D scan)
+          <topic>/points     → gz.msgs.PointCloudPacked (3D cloud)
+        So we set <topic>/ouster</topic> and the 3D cloud lands on
+        gz topic /ouster/points, which ros_gz_bridge maps to the ROS2
+        /ouster/points topic the tracker node subscribes to.
+      -->
+      <sensor name="ouster_os0_lidar" type="gpu_lidar">
+        <always_on>1</always_on>
+        <update_rate>10</update_rate>
+        <!-- base topic; 3D cloud is auto-published on <topic>/points -->
+        <topic>/ouster</topic>
+        <!-- frame_id used in PointCloud2 header after bridging -->
+        <gz_frame_id>ouster_frame</gz_frame_id>
+        <!-- Show the laser rays in the gz sim GUI (direct child of <sensor>).
+             Set to false if the 64×1024 ray fan slows the GUI down. -->
+        <visualize>true</visualize>
+
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>1024</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.14159265358979</min_angle>
+              <max_angle>3.14159265358979</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>64</samples>
+              <resolution>1</resolution>
+              <!-- Ouster OS0 vertical FOV: ±45.4° = ±0.79234 rad -->
+              <min_angle>-0.79234</min_angle>
+              <max_angle>0.79234</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.3</min>
+            <max>35.0</max>
+            <resolution>0.001</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.008</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </link>
+  </model>
+</sdf>

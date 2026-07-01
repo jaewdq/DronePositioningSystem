@@ -1,0 +1,19 @@
+# ROS2 build artifacts
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Flight logs (generated at runtime)
+flight_logs/
+*.bag
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
