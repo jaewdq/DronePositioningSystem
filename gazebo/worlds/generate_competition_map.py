@@ -68,7 +68,8 @@ markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 #   → 금지: x in (-1.5, 31.5) AND y in (-1.5, 21.5). 이 밖에 설치해야 함.
 # 두 대를 "직교 방향"(동쪽+북쪽)으로 배치해 삼각측량 정확도를 높이고
 # 가림(occlusion)에 강건하게 한다. gpu_lidar 센서의 3D 클라우드는
-# <topic>/points 로 나가므로 topic을 /ouster1, /ouster2 로 준다.
+# <topic>/points 로 나가므로 topic을 /lidar1, /lidar2 로 준다 (실제 하드웨어 +
+# lidar_extrinsic_calib 패키지의 기본 토픽명과 통일).
 # generate_groundtruth... 가 아니라 drone_localization 의 YAML(lidar1_*/lidar2_*)
 # 과 이 좌표를 항상 동일하게 유지할 것.
 # 배치 근거(커버리지 계산): 필드 대각선 36m > 사거리 35m 라 한 대로는 반대
@@ -83,8 +84,8 @@ markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 # 필드 중심(15,10)을 향하게만 둔다.
 LIDARS = [
     # (name, topic, x, y, z, roll, pitch, yaw)
-    ("ground_lidar_1", "/ouster1", -1.5, -1.5, 1.5, 0.0, 0.0, 0.6094),   # landpad 코너(남서), 필드향
-    ("ground_lidar_2", "/ouster2", 31.5, 21.5, 1.5, 0.0, 0.0, -2.5322),  # 대각(북동), 필드향
+    ("ground_lidar_1", "/lidar1", -1.5, -1.5, 1.5, 0.0, 0.0, 0.6094),   # landpad 코너(남서), 필드향
+    ("ground_lidar_2", "/lidar2", 31.5, 21.5, 1.5, 0.0, 0.0, -2.5322),  # 대각(북동), 필드향
 ]
 
 # ---------------------------------------------------------------------------

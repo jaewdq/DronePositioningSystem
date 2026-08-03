@@ -5,17 +5,20 @@ Two-LiDAR drone 3D localization node (outside-in, ground-fixed sensors).
 Two ground LiDARs (east + north, perpendicular views) each publish a
 PointCloud2. Each callback transforms its cloud into the shared Gazebo
 world frame and buffers it. A fixed-rate timer then fuses the buffers and
-runs one pipeline + EKF step:
+runs one pipeline + KF step:
 
-  /ouster1/points ─┐ (→ world frame, buffered)
-                   ├─ concat ─→ ROI filter
-  /ouster2/points ─┘             → voxel downsampling (open3d)
-                                 → RANSAC ground removal (open3d)
+  /lidar1/points ─┐ (→ world frame, buffered)
+                  ├─ concat ─→ ROI filter (z-band = hover altitude only)
+  /lidar2/points ─┘             → voxel downsampling (open3d)
                                  → statistical outlier removal (rain/scatter)
                                  → DBSCAN clustering (open3d, PCL-equivalent)
                                  → drone cluster selection
-                                 → EKF predict+update (6-state const-velocity)
+                                 → KF predict+update (6-state const-velocity)
                                  → PoseWithCovarianceStamped /drone/estimated_pose
+
+Ground-state (pre-liftoff/post-landing) tracking is intentionally out of
+scope: the ROI z-band only spans the hover altitude, so the pipeline never
+sees the floor and needs no separate ground-removal step.
 
 Fusing two perpendicular views triangulates the target in 3D and roughly
 doubles the number of hits on the small (~50cm) drone.
@@ -29,31 +32,31 @@ Dependencies (install once):
     pip3 install open3d scipy
 """
 
+import csv
 import math
+import os
 import time
 
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import (
-    DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+    HistoryPolicy, QoSProfile, ReliabilityPolicy
 )
 from geometry_msgs.msg import PoseWithCovarianceStamped
-from sensor_msgs.msg import PointCloud2, PointField
+from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Header
 from visualization_msgs.msg import Marker, MarkerArray
 
 try:
     from scipy.spatial.transform import Rotation as R
-    HAS_SCIPY = True
 except ImportError:
-    HAS_SCIPY = False
+    raise ImportError('scipy가 설치되지 않았습니다. pip3 install scipy 실행하세요.')
 
 try:
     import open3d as o3d
-    HAS_O3D = True
 except ImportError:
-    HAS_O3D = False
+    raise ImportError('open3d가 설치되지 않았습니다. pip3 install open3d 실행하세요.')
 
 # Use sensor_msgs_py if available (ROS2 Humble ships it), fall back to sensor_msgs
 try:
@@ -63,9 +66,10 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# EKF: 6-state (x, y, z, vx, vy, vz), constant-velocity model
+# KF: 6-state (x, y, z, vx, vy, vz), constant-velocity model (standard KF —
+# F and H are both linear/constant, so there is nothing "extended" here)
 # ---------------------------------------------------------------------------
-class EKF6D:
+class KF6D:
     def __init__(self, proc_noise_pos: float, proc_noise_vel: float, meas_noise_pos: float):
         self.x = np.zeros(6)
         self.P = np.eye(6) * 9.0  # high initial uncertainty = 3m std
@@ -108,9 +112,12 @@ class EKF6D:
     def update(self, z: np.ndarray):
         y = z - self.H @ self.x                         # innovation
         S = self.H @ self.P @ self.H.T + self.R
-        K = self.P @ self.H.T @ np.linalg.inv(S)        # Kalman gain
+        K = self.P @ self.H.T @ np.linalg.solve(S, np.eye(3))  # Kalman gain
         self.x = self.x + K @ y
-        self.P = (np.eye(6) - K @ self.H) @ self.P
+        # Joseph form: guarantees P stays symmetric/positive-definite even
+        # under floating-point roundoff (the (I-KH)@P form can lose that).
+        IKH = np.eye(6) - K @ self.H
+        self.P = IKH @ self.P @ IKH.T + K @ self.R @ K.T
 
     @property
     def position(self) -> np.ndarray:
@@ -144,36 +151,35 @@ class SensorCfg:
 
 
 class LidarDroneTracker(Node):
-    # Field center in Gazebo world frame (field spans [0,30]x[0,20])
-    _FIELD_CX = 15.0
-    _FIELD_CY = 10.0
-    # Half-extents of the 33x23m exclusion zone around the field center
-    _EXCL_HX = 16.5
-    _EXCL_HY = 11.5
-
     def __init__(self):
         super().__init__('lidar_drone_tracker')
 
-        if not HAS_O3D:
-            self.get_logger().fatal(
-                'open3d not installed. Run: pip3 install open3d')
-            raise SystemExit(1)
-        if not HAS_SCIPY:
-            self.get_logger().fatal(
-                'scipy not installed. Run: pip3 install scipy')
-            raise SystemExit(1)
-
         self._declare_parameters()
         self._read_parameters()
-        self._build_sensors()          # builds + validates all sensor poses
+        self._build_sensors()          # builds all sensor configs
 
-        self._ekf = EKF6D(
+        self._kf = KF6D(
             self.proc_noise_pos, self.proc_noise_vel, self.meas_noise_pos)
         # Seed the filter at the known home pad so tracking is locked from the
         # ground and the selection prefers the cluster nearest to the pad.
         if self.seed_at_home:
-            self._ekf.init(self.home_xyz.copy())
+            self._kf.init(self.home_xyz.copy())
         self._coast_count = 0
+
+        # Waypoint (마커) 호버 감지 상태
+        self._wp_active_id = None
+        self._wp_samples = []
+        self._wp_break_count = 0
+        self._wp_visit_counts = {}
+        self._wp_markers = MarkerArray()
+
+        os.makedirs(self.waypoint_log_dir, exist_ok=True)
+        self._wp_csv_path = os.path.join(
+            self.waypoint_log_dir, 'waypoint_estimates.csv')
+        self._wp_csv_f = open(self._wp_csv_path, 'w', newline='')
+        self._wp_csv_w = csv.writer(self._wp_csv_f)
+        self._wp_csv_w.writerow(
+            ['marker_id', 'visit', 'x', 'y', 'z', 'n_samples', 'duration_s'])
 
         # Latest world-frame cloud per sensor: index → (Nx3 array, monotonic_t)
         self._buffers: list = [None] * len(self._sensors)
@@ -202,11 +208,12 @@ class LidarDroneTracker(Node):
         )
 
         # One subscription per LiDAR; each stores its cloud in world frame.
-        self._subs = []
-        for i, cfg in enumerate(self._sensors):
-            self._subs.append(self.create_subscription(
-                PointCloud2, cfg.topic,
-                self._make_pc_callback(i), sensor_qos))
+        self._subs = [
+            self.create_subscription(
+                PointCloud2, self._sensors[0].topic, self._cb_lidar1, sensor_qos),
+            self.create_subscription(
+                PointCloud2, self._sensors[1].topic, self._cb_lidar2, sensor_qos),
+        ]
 
         self._pub_pose = self.create_publisher(
             PoseWithCovarianceStamped, '/drone/estimated_pose', reliable_qos)
@@ -214,10 +221,12 @@ class LidarDroneTracker(Node):
             PointCloud2, '/lidar/filtered_points', sensor_qos)
         self._pub_markers = self.create_publisher(
             MarkerArray, '/lidar/cluster_markers', reliable_qos)
+        self._pub_waypoints = self.create_publisher(
+            MarkerArray, '/drone/waypoint_estimates', reliable_qos)
 
         # Single processing clock at the LiDAR rate: fuse both buffers,
-        # run the pipeline, and step the EKF at a fixed dt. Decoupling the
-        # fusion from the two async callbacks keeps EKF timing consistent.
+        # run the pipeline, and step the KF at a fixed dt. Decoupling the
+        # fusion from the two async callbacks keeps KF timing consistent.
         self._proc_timer = self.create_timer(self._dt, self._process)
 
         names = ', '.join(
@@ -234,7 +243,7 @@ class LidarDroneTracker(Node):
         # --- LiDAR 1 pose in Gazebo world frame (ENU) ---
         # Default: east side, x=35 (outside the 31.5m exclusion boundary),
         # facing west (yaw=π) toward field centre (15,10).
-        self.declare_parameter('lidar1_topic', '/ouster1/points')
+        self.declare_parameter('lidar1_topic', '/lidar1/points')
         self.declare_parameter('lidar1_x',     35.0)
         self.declare_parameter('lidar1_y',     10.0)
         self.declare_parameter('lidar1_z',      2.5)
@@ -244,9 +253,7 @@ class LidarDroneTracker(Node):
 
         # --- LiDAR 2 pose (perpendicular view for triangulation) ---
         # Default: north side, y=25 (outside 21.5m boundary), facing south.
-        # Set enable_lidar2:=false to run with a single LiDAR.
-        self.declare_parameter('enable_lidar2', True)
-        self.declare_parameter('lidar2_topic', '/ouster2/points')
+        self.declare_parameter('lidar2_topic', '/lidar2/points')
         self.declare_parameter('lidar2_x',     15.0)
         self.declare_parameter('lidar2_y',     25.0)
         self.declare_parameter('lidar2_z',      2.5)
@@ -260,22 +267,17 @@ class LidarDroneTracker(Node):
 
         self.declare_parameter('voxel_leaf_size', 0.05)
 
-        # ROI in world frame — 2m margin around the 30×20 field
+        # ROI in world frame. X/Y: 2m margin around the 30×20 field.
+        # Z: hover-altitude band only (1.0–3.0m) — this is the ONLY height
+        # filter in the pipeline now. Ground-state (pre-liftoff/post-landing)
+        # tracking is out of scope, so points near the floor never need to be
+        # separated from the drone; the ROI simply never lets them through.
         self.declare_parameter('roi_x_min', -2.0)
         self.declare_parameter('roi_x_max', 32.0)
         self.declare_parameter('roi_y_min', -2.0)
         self.declare_parameter('roi_y_max', 22.0)
-        self.declare_parameter('roi_z_min',  0.0)
-        self.declare_parameter('roi_z_max',  6.0)
-
-        # RANSAC ground removal
-        # threshold=5cm: captures grid-line decals (effectively z≈0) while
-        # keeping the drone (≥0.5m altitude) as an outlier to preserve.
-        # Only removes the plane if it captures ≥20% of ROI points, to
-        # avoid accidentally decimating a drone-body false-positive plane.
-        self.declare_parameter('ransac_distance_threshold', 0.05)
-        self.declare_parameter('ransac_max_iterations',     100)
-        self.declare_parameter('ground_inlier_min_ratio',   0.20)
+        self.declare_parameter('roi_z_min',  1.0)
+        self.declare_parameter('roi_z_max',  3.0)
 
         # Statistical outlier removal (rain / scatter noise)
         self.declare_parameter('sor_mean_k',     20)
@@ -288,40 +290,71 @@ class LidarDroneTracker(Node):
         self.declare_parameter('cluster_min_points',  3)
         self.declare_parameter('cluster_max_points',  400)
 
-        # Height filter (world Z). Lowered to 0.05 so the drone SITTING ON
-        # the pad (centroid ~0.15m) is recognised from the start, not just
-        # once airborne. Ground-fixed obstacles are instead rejected by the
-        # home-seed + nearest-to-track selection (see below).
-        self.declare_parameter('min_drone_height', 0.05)
-        self.declare_parameter('max_drone_height', 5.5)
-
-        # Home-seed: the drone always starts at a known pad. Seeding the EKF
-        # there lets tracking lock on immediately (even on the ground) and
-        # makes the nearest-to-track selection reject a distant ground box.
+        # Home-seed: seeds the KF near where the drone should first appear so
+        # early-frame candidate selection (nearest-to-track) has a prior
+        # instead of falling back to cold-start (largest cluster). The ROI
+        # only sees the hover band, so home_z must be a hover altitude
+        # (~2.0m) — NOT the pad height, which now sits outside the ROI
+        # entirely and would just fail the association gate on first detection.
         self.declare_parameter('seed_at_home', True)
         self.declare_parameter('home_x', 0.0)
         self.declare_parameter('home_y', 0.0)
-        self.declare_parameter('home_z', 0.15)
+        self.declare_parameter('home_z', 2.0)
 
-        # EKF noise
+        # KF noise
         self.declare_parameter('proc_noise_pos',  0.05)
         self.declare_parameter('proc_noise_vel',  0.30)
         self.declare_parameter('meas_noise_pos',  0.15)
 
-        # Gating: reject a candidate farther than this from the EKF prediction
-        # (metres). Stops the airborne track from snapping onto a low ground
-        # residual now that min_drone_height is small. Must exceed the distance
-        # the drone can travel during a coast: 0.75 m/s × 1.5 s ≈ 1.1 m.
+        # Gating: reject a candidate farther than this from the KF prediction
+        # (metres). Must exceed the distance the drone can travel during a
+        # coast: 0.75 m/s × 1.5 s ≈ 1.1 m.
         self.declare_parameter('max_assoc_dist', 3.0)
 
         # Coasting: max frames to continue pure-predict when no detection
         self.declare_parameter('coast_max_frames', 5)
+        # Prolonged loss: after this many coast frames, drop the KF entirely
+        # (cold-start) so the next detection is free to re-lock on the
+        # largest cluster instead of being gated against a stale prediction.
+        self.declare_parameter('reset_after_frames', 50)  # 5초 @ 10Hz
 
         self.declare_parameter('lidar_update_rate', 10.0)
 
+        # ---------------------------------------------------------------
+        # Waypoint(마커) 호버 감지 + 위치 재추정
+        #
+        # 대회 규정에 마커 위 호버 시간이 정해져 있지 않고 팀마다 체류
+        # 패턴이 다르므로, 고정 시간이 아니라 "느림 + 근접" 조건으로
+        # 판정한다. 채점기준 "경로점 위치추정" 하 등급이 <4m이므로,
+        # 게이트 반경은 이보다 여유있게 잡아 항법이 부정확한 팀도
+        # 표본을 놓치지 않게 한다 (좁게 잡으면 그런 팀은 표본이 아예
+        # 안 잡혀서 채점 자체가 불가능해짐).
+        self.declare_parameter('waypoint_gate_radius', 4.5)       # m
+        self.declare_parameter('waypoint_speed_threshold', 0.25)  # m/s
+        # 최소 연속 프레임(4프레임 @ 10Hz ≈ 0.4초). 이보다 짧으면 노이즈로
+        # 버림 — 아주 잠깐 스치듯 지나가는 팀도 놓치지 않게 여유있게(짧게) 잡음.
+        self.declare_parameter('waypoint_min_frames', 4)
+        # 짧은 이탈 유예 프레임(5프레임 @ 10Hz = 0.5초). 속도추정이 정지
+        # 중에도 미세하게 흔들려 문턱값을 순간적으로 넘나드는 것 때문에
+        # 하나의 호버가 여러 조각으로 쪼개지는 걸 방지 — 이 프레임 수
+        # 이내로 짧게 이탈하면 무시하고 같은 방문으로 이어붙인다.
+        self.declare_parameter('waypoint_grace_frames', 5)
+        self.declare_parameter(
+            'waypoint_log_dir', os.path.expanduser('~/drone_project/flight_logs'))
+
+        # 마커 좌표. generate_competition_map.py의 marker_coords와 항상
+        # 동일하게 유지할 것 (LIDARS 좌표와 같은 방식으로 수동 동기화).
+        self.declare_parameter('marker1_x', 4.2857)
+        self.declare_parameter('marker1_y', 4.0)
+        self.declare_parameter('marker2_x', 4.2857)
+        self.declare_parameter('marker2_y', 16.0)
+        self.declare_parameter('marker3_x', 25.7143)
+        self.declare_parameter('marker3_y', 4.0)
+        self.declare_parameter('marker4_x', 12.8571)
+        self.declare_parameter('marker4_y', 12.0)
+
     def _read_parameters(self):
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
-        self.enable_lidar2 = gp('enable_lidar2')
         self.buffer_stale_timeout = gp('buffer_stale_timeout')
         self.voxel_leaf_size = gp('voxel_leaf_size')
         self.roi_x_min = gp('roi_x_min')
@@ -330,16 +363,11 @@ class LidarDroneTracker(Node):
         self.roi_y_max = gp('roi_y_max')
         self.roi_z_min = gp('roi_z_min')
         self.roi_z_max = gp('roi_z_max')
-        self.ransac_dist  = gp('ransac_distance_threshold')
-        self.ransac_iters = gp('ransac_max_iterations')
-        self.ground_ratio = gp('ground_inlier_min_ratio')
         self.sor_k        = gp('sor_mean_k')
         self.sor_std      = gp('sor_std_ratio')
         self.eps          = gp('cluster_tolerance')
         self.min_pts      = gp('cluster_min_points')
         self.max_pts      = gp('cluster_max_points')
-        self.min_h        = gp('min_drone_height')
-        self.max_h        = gp('max_drone_height')
         self.seed_at_home = gp('seed_at_home')
         self.home_xyz     = np.array(
             [gp('home_x'), gp('home_y'), gp('home_z')])
@@ -347,69 +375,66 @@ class LidarDroneTracker(Node):
         self.proc_noise_pos = gp('proc_noise_pos')
         self.proc_noise_vel = gp('proc_noise_vel')
         self.meas_noise_pos = gp('meas_noise_pos')
+        self.waypoint_gate_radius = gp('waypoint_gate_radius')
+        self.waypoint_speed_threshold = gp('waypoint_speed_threshold')
+        self.waypoint_min_frames = gp('waypoint_min_frames')
+        self.waypoint_grace_frames = gp('waypoint_grace_frames')
+        self.waypoint_log_dir = gp('waypoint_log_dir')
+        self._marker_xy = {
+            1: (gp('marker1_x'), gp('marker1_y')),
+            2: (gp('marker2_x'), gp('marker2_y')),
+            3: (gp('marker3_x'), gp('marker3_y')),
+            4: (gp('marker4_x'), gp('marker4_y')),
+        }
         self.coast_max    = gp('coast_max_frames')
+        self.reset_after  = gp('reset_after_frames')
         self.update_rate  = gp('lidar_update_rate')
         self._dt = 1.0 / self.update_rate
 
     def _build_sensors(self):
         gp = lambda n: self.get_parameter(n).value  # noqa: E731
-        specs = [(
-            'lidar1', gp('lidar1_topic'), gp('lidar1_x'), gp('lidar1_y'),
-            gp('lidar1_z'), gp('lidar1_roll'), gp('lidar1_pitch'),
-            gp('lidar1_yaw'))]
-        if self.enable_lidar2:
-            specs.append((
-                'lidar2', gp('lidar2_topic'), gp('lidar2_x'), gp('lidar2_y'),
-                gp('lidar2_z'), gp('lidar2_roll'), gp('lidar2_pitch'),
-                gp('lidar2_yaw')))
+        specs = [
+            ('lidar1', gp('lidar1_topic'), gp('lidar1_x'), gp('lidar1_y'),
+             gp('lidar1_z'), gp('lidar1_roll'), gp('lidar1_pitch'),
+             gp('lidar1_yaw')),
+            ('lidar2', gp('lidar2_topic'), gp('lidar2_x'), gp('lidar2_y'),
+             gp('lidar2_z'), gp('lidar2_roll'), gp('lidar2_pitch'),
+             gp('lidar2_yaw')),
+        ]
 
         self._sensors = []
         for name, topic, x, y, z, roll, pitch, yaw in specs:
-            self._validate_pose(name, x, y)
             self._sensors.append(SensorCfg(name, topic, x, y, z, roll, pitch, yaw))
-
-    def _validate_pose(self, name, x, y):
-        dx = abs(x - self._FIELD_CX)
-        dy = abs(y - self._FIELD_CY)
-        if dx < self._EXCL_HX and dy < self._EXCL_HY:
-            self.get_logger().fatal(
-                f'{name} position ({x:.2f}, {y:.2f}) falls inside the '
-                f'33x23m exclusion zone centred at '
-                f'({self._FIELD_CX}, {self._FIELD_CY}). '
-                f'Required: |x-{self._FIELD_CX}|>{self._EXCL_HX} OR '
-                f'|y-{self._FIELD_CY}|>{self._EXCL_HY}. '
-                'Valid examples: (35,10) east, (-2,10) west, (15,25) north, '
-                '(15,-2) south.'
-            )
-            raise SystemExit(1)
 
     # ------------------------------------------------------------------
     # Per-sensor callback: store the latest cloud in WORLD frame
     # ------------------------------------------------------------------
-    def _make_pc_callback(self, index: int):
-        cfg = self._sensors[index]
+    def _cb_lidar1(self, msg: PointCloud2):
+        pts = self._pc2_to_numpy(msg)
+        if pts is None or len(pts) == 0:
+            return
+        world = self._sensors[0].to_world(pts)
+        self._buffers[0] = (world, time.monotonic(), msg.header.stamp)
 
-        def _cb(msg: PointCloud2):
-            pts = self._pc2_to_numpy(msg)
-            if pts is None or len(pts) == 0:
-                return
-            world = cfg.to_world(pts)
-            self._buffers[index] = (world, time.monotonic())
-
-        return _cb
+    def _cb_lidar2(self, msg: PointCloud2):
+        pts = self._pc2_to_numpy(msg)
+        if pts is None or len(pts) == 0:
+            return
+        world = self._sensors[1].to_world(pts)
+        self._buffers[1] = (world, time.monotonic(), msg.header.stamp)
 
     # ------------------------------------------------------------------
-    # Fusion + pipeline + EKF, driven by a fixed-rate timer
+    # Fusion + pipeline + KF, driven by a fixed-rate timer
     # ------------------------------------------------------------------
     def _process(self):
         now = time.monotonic()
-        clouds = []
+        valid = []
         for i, buf in enumerate(self._buffers):
             if buf is None:
                 continue
-            pts, t = buf
+            pts, t, stamp = buf
             if now - t <= self.buffer_stale_timeout:
-                clouds.append(pts)
+                valid.append((i, pts, stamp))
                 self._stat_sensor_pts[i] += len(pts)
                 self._stat_sensor_hits[i] += 1
 
@@ -417,11 +442,22 @@ class LidarDroneTracker(Node):
         header.stamp = self.get_clock().now().to_msg()
         header.frame_id = 'map'
 
-        if not clouds:
+        if len(valid) == 0:
             self._coast(header)
+        elif len(valid) == 2:
+            # 두 LiDAR stamp 차이 확인
+            t0 = valid[0][2].sec + valid[0][2].nanosec * 1e-9
+            t1 = valid[1][2].sec + valid[1][2].nanosec * 1e-9
+            if abs(t0 - t1) < 0.05:  # 50ms 이내만 융합
+                pts_w = np.concatenate([valid[0][1], valid[1][1]], axis=0)
+                self._process_cloud(pts_w, header)
+            else:
+                # 시간차 너무 크면 최신 것만 사용
+                pts_w = valid[0][1] if t0 > t1 else valid[1][1]
+                self._process_cloud(pts_w, header)
         else:
-            pts_w = np.concatenate(clouds, axis=0)
-            self._process_cloud(pts_w, header)
+            # LiDAR 1개만 유효한 경우
+            self._process_cloud(valid[0][1], header)
 
         self._maybe_log_stats(now)
 
@@ -432,13 +468,12 @@ class LidarDroneTracker(Node):
         if f == 0:
             self.get_logger().warn(
                 'No LiDAR input in the last '
-                f'{self._stat_period:.0f}s — check /ouster1,2/points and Agent.')
+                f'{self._stat_period:.0f}s — check /lidar1,2/points and Agent.')
         else:
             det = self._stat_detect
             rate = 100.0 * det / f
             avg_pts = (self._stat_cluster_pts / det) if det else 0.0
             avg_cand = self._stat_cand / f
-            avg_merged = self._stat_merged_pts / f
             # Per-sensor fusion breakdown: how often each LiDAR contributed
             # and how many points on average → confirms both are fused.
             sensors = []
@@ -460,7 +495,7 @@ class LidarDroneTracker(Node):
         self._stat_sensor_hits = [0] * n
 
     def _process_cloud(self, pts_w: np.ndarray, header: Header):
-        """Run the full pipeline on the fused world-frame cloud, step EKF."""
+        """Run the full pipeline on the fused world-frame cloud, step KF."""
         self._stat_frames += 1
         self._stat_merged_pts += len(pts_w)
         # ROI filter in world frame (drops inf/nan-origin points too, since
@@ -475,20 +510,24 @@ class LidarDroneTracker(Node):
             self._coast(header)
             return
 
-        # Open3D processing: voxel → ground removal → outlier removal
+        # Open3D processing: voxel → outlier removal
+        # (no separate ground-removal stage: the ROI z-band above already
+        # excludes everything outside the hover altitude, floor included)
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(pts_w.astype(np.float64))
 
-        pcd = pcd.voxel_down_sample(self.voxel_leaf_size)
-        pcd = self._remove_ground(pcd)
+        # voxel downsampling 비활성화
+        # 드론처럼 클러스터 포인트 수가 적은 상황에서 centroid 추정 정확도
+        # 저하 우려 - 계산 속도와 정확도 트레이드오프 - 필요시 아래 주석 해제
+        # pcd = pcd.voxel_down_sample(self.voxel_leaf_size)
 
-        # SOR targets rain/scatter noise. Only run it when the post-ground
-        # cloud is dense enough to clearly BE clutter — in clear air only the
-        # drone's few points remain, and SOR could delete that sparse cluster
-        # (a 2-3 point drone at long range would be wrongly flagged outlier).
-        if len(pcd.points) > max(self.sor_k * 5, 100):
-            pcd, _ = pcd.remove_statistical_outlier(
-                nb_neighbors=self.sor_k, std_ratio=self.sor_std)
+        # SOR 비활성화
+        # 비/안개 등 산란잡음 억제용인데 지금은 그런 잡음원이 없고, OS1-128의
+        # 조밀한 클러스터(수십~수백 점)에서 뭘 걸러내는지 불확실해 디버깅 중
+        # 변수를 줄이려고 끔 - 필요시 아래 주석 해제
+        # if len(pcd.points) > max(self.sor_k * 5, 100):
+        #     pcd, _ = pcd.remove_statistical_outlier(
+        #         nb_neighbors=self.sor_k, std_ratio=self.sor_std)
 
         # Publish filtered cloud for RViz2 debugging
         pts_f = np.asarray(pcd.points, dtype=np.float32)
@@ -512,59 +551,35 @@ class LidarDroneTracker(Node):
         centroid = self._select_drone_cluster(pts_f, labels, header)
         self._stat_cand += self._last_n_cand
 
-        # EKF predict (fixed dt from the processing timer) → update
-        self._ekf.predict(self._dt)
+        # KF predict (fixed dt from the processing timer) → update
+        self._kf.predict(self._dt)
 
         if centroid is not None:
             self._stat_detect += 1
             self._stat_cluster_pts += self._last_sel_n
-            if not self._ekf.initialized:
-                self._ekf.init(centroid)
+            if not self._kf.initialized:
+                self._kf.init(centroid)
             else:
-                self._ekf.update(centroid)
+                self._kf.update(centroid)
             self._coast_count = 0
+            self._update_waypoint_tracking(centroid)
         else:
             self._coast_count += 1
-            if self._coast_count > self.coast_max:
+            if self._coast_count > self.reset_after:
+                self.get_logger().warn(
+                    f'Tracking LOST {self._coast_count}프레임 → KF 리셋, 재획득 대기')
+                self._kf.initialized = False
+                self._coast_count = 0
+                self._finalize_waypoint_episode()
+                return
+            elif self._coast_count > self.coast_max:
                 self.get_logger().warn(
                     f'Tracking LOST: {self._coast_count} consecutive '
                     'missed frames.', throttle_duration_sec=2.0)
                 return
 
-        if self._ekf.initialized:
+        if self._kf.initialized:
             self._publish_pose(header)
-
-    # ------------------------------------------------------------------
-    # Ground removal
-    # ------------------------------------------------------------------
-    def _remove_ground(self, pcd: 'o3d.geometry.PointCloud') -> 'o3d.geometry.PointCloud':
-        n_total = len(pcd.points)
-        if n_total < 4:
-            return pcd
-
-        try:
-            plane_model, inliers = pcd.segment_plane(
-                distance_threshold=self.ransac_dist,
-                ransac_n=3,
-                num_iterations=self.ransac_iters,
-            )
-        except Exception:
-            return pcd
-
-        # Guard 1: not enough inliers to confidently call it the ground plane
-        if len(inliers) < n_total * self.ground_ratio:
-            return pcd
-
-        # Guard 2: plane normal must be roughly vertical (|nz| > cos 45°)
-        # This prevents removing a large vertical structure (wall, obstacle)
-        # that RANSAC might fit when the drone is absent and the scene is sparse.
-        normal = np.asarray(plane_model[:3])
-        if np.linalg.norm(normal) > 0:
-            normal = normal / np.linalg.norm(normal)
-        if abs(normal[2]) < 0.7:
-            return pcd
-
-        return pcd.select_by_index(inliers, invert=True)
 
     # ------------------------------------------------------------------
     # Drone cluster selection
@@ -591,12 +606,12 @@ class LidarDroneTracker(Node):
             if n < self.min_pts or n > self.max_pts:
                 continue
 
-            centroid = cluster.mean(axis=0)
-
-            # Height filter: excludes ground-fixed obstacles (box at floor level)
-            if centroid[2] < self.min_h or centroid[2] > self.max_h:
-                continue
-
+            # median, not mean: a stray outlier point in the cluster pulls
+            # the mean noticeably but barely moves the median.
+            centroid = np.median(cluster, axis=0)
+            # No height gate here: the ROI z-band (roi_z_min/max) already
+            # constrains every surviving point to the hover band, so any
+            # cluster's centroid is guaranteed to already be inside it.
             candidates.append((label, centroid, n))
 
             # Debug sphere marker (green) at cluster centroid
@@ -624,15 +639,15 @@ class LidarDroneTracker(Node):
         if not candidates:
             return None
 
-        if self._ekf.initialized:
-            # Prefer the cluster nearest to the current EKF estimate (which is
+        if self._kf.initialized:
+            # Prefer the cluster nearest to the current KF estimate (which is
             # seeded at home, so this locks onto the pad drone from the start
             # and rejects a distant ground obstacle). Still valid while coasting
             # — the predicted position is a good prior.
-            ekf_pos = self._ekf.position
-            candidates.sort(key=lambda c: float(np.linalg.norm(c[1] - ekf_pos)))
+            kf_pos = self._kf.position
+            candidates.sort(key=lambda c: float(np.linalg.norm(c[1] - kf_pos)))
             # Gate: if even the nearest candidate is too far, it isn't the drone.
-            if float(np.linalg.norm(candidates[0][1] - ekf_pos)) > self.max_assoc_dist:
+            if float(np.linalg.norm(candidates[0][1] - kf_pos)) > self.max_assoc_dist:
                 return None
         else:
             # Truly cold start (home-seed disabled): the drone is the LARGEST
@@ -646,22 +661,29 @@ class LidarDroneTracker(Node):
     # Coast (predict-only when no detection)
     # ------------------------------------------------------------------
     def _coast(self, header: Header):
-        if not self._ekf.initialized:
+        if not self._kf.initialized:
             return
-        self._ekf.predict(self._dt)
+        self._kf.predict(self._dt)
         self._coast_count += 1
         if self._coast_count <= self.coast_max:
             self._publish_pose(header)
+        elif self._coast_count > self.reset_after:  # 기본값 50프레임 = 5초
+            self.get_logger().warn(
+                f'Tracking LOST {self._coast_count}프레임 → KF 리셋, 재획득 대기')
+            self._kf.initialized = False
+            self._coast_count = 0
+            self._finalize_waypoint_episode()
         else:
             self.get_logger().warn(
-                f'Tracking LOST after {self._coast_count} coast frames.')
+                f'Tracking LOST: {self._coast_count} coast frames.',
+                throttle_duration_sec=2.0)
 
     # ------------------------------------------------------------------
     # Publishers
     # ------------------------------------------------------------------
     def _publish_pose(self, header: Header):
-        pos = self._ekf.position
-        cov_pos = self._ekf.cov_pos
+        pos = self._kf.position
+        cov_pos = self._kf.cov_pos
 
         msg = PoseWithCovarianceStamped()
         msg.header.stamp = header.stamp
@@ -678,6 +700,113 @@ class LidarDroneTracker(Node):
         msg.pose.covariance = cov
 
         self._pub_pose.publish(msg)
+
+    # ------------------------------------------------------------------
+    # Waypoint(마커) 호버 감지 + 위치 재추정
+    # ------------------------------------------------------------------
+    def _update_waypoint_tracking(self, centroid: np.ndarray):
+        """가장 가까운 마커 반경 안에서 정지 상태가 유지되는 동안 raw
+        centroid 표본을 모은다. KF 평활값이 아니라 raw 값을 쓰는 이유:
+        정지 전환 구간에서 KF는 관성으로 인해 실제 위치보다 살짝 지연된
+        값을 내므로, 여러 프레임의 raw 표본을 median으로 묶는 쪽이 더
+        정확하다. 속도 판정만 KF의 평활 속도를 쓴다 (raw centroid 프레임간
+        노이즈만으로는 속도 추정이 너무 불안정함).
+
+        속도추정이 정지 중에도 프레임 단위로 미세하게 흔들려서 문턱값을
+        순간적으로 넘나드는 경우가 실측에서 확인됨 — 그때마다 즉시
+        끊어버리면 진짜 하나의 호버가 여러 조각으로 쪼개진다. 그래서
+        이탈이 waypoint_grace_frames 이내로 짧으면 무시하고 같은 방문으로
+        이어붙이고, 그보다 길게 지속돼야 실제로 떠난 것으로 본다."""
+        speed = float(np.linalg.norm(self._kf.velocity[:2]))  # 수평 속도만
+        slow = speed <= self.waypoint_speed_threshold
+
+        if self._wp_active_id is not None:
+            # 이미 특정 마커를 추적 중이면, "가장 가까운 마커"를 새로 찾지
+            # 않고 지금 추적 중인 그 마커와의 거리만 본다 (경계에서 다른
+            # 마커로 순간 전환되는 걸 방지).
+            mx, my = self._marker_xy[self._wp_active_id]
+            d = math.hypot(centroid[0] - mx, centroid[1] - my)
+            near = d <= self.waypoint_gate_radius
+            if near and slow:
+                self._wp_samples.append(centroid.copy())
+                self._wp_break_count = 0
+                return
+            self._wp_break_count += 1
+            if self._wp_break_count <= self.waypoint_grace_frames:
+                return  # 짧은 이탈 — 유예, 같은 방문 유지 (이 프레임 표본은 버림)
+            self._finalize_waypoint_episode()
+            # 이 프레임에 새 방문이 시작될 수도 있으니 아래로 계속 진행
+
+        # 활성 방문이 없는 상태 — 새 방문 시작 여부 판정
+        best_id, best_d = None, None
+        for mid, (mx, my) in self._marker_xy.items():
+            d = math.hypot(centroid[0] - mx, centroid[1] - my)
+            if best_d is None or d < best_d:
+                best_id, best_d = mid, d
+
+        near = best_d is not None and best_d <= self.waypoint_gate_radius
+        if near and slow:
+            self._wp_active_id = best_id
+            self._wp_samples = [centroid.copy()]
+            self._wp_break_count = 0
+
+    def _finalize_waypoint_episode(self):
+        mid = self._wp_active_id
+        samples = self._wp_samples
+        self._wp_active_id = None
+        self._wp_samples = []
+        self._wp_break_count = 0
+        if mid is None or len(samples) < self.waypoint_min_frames:
+            return
+
+        arr = np.array(samples)
+        med = np.median(arr, axis=0)
+        n = len(samples)
+        duration = n / self.update_rate
+
+        self._wp_visit_counts[mid] = self._wp_visit_counts.get(mid, 0) + 1
+        visit = self._wp_visit_counts[mid]
+
+        self.get_logger().info(
+            f'[경로점] id{mid} 방문#{visit}: '
+            f'({med[0]:.3f}, {med[1]:.3f}, {med[2]:.3f})  '
+            f'n={n}샘플({duration:.1f}초)')
+
+        self._wp_csv_w.writerow([
+            mid, visit, f'{med[0]:.4f}', f'{med[1]:.4f}', f'{med[2]:.4f}',
+            n, f'{duration:.2f}'])
+        self._wp_csv_f.flush()
+
+        self._publish_waypoint_marker(mid, visit, med)
+
+    def _publish_waypoint_marker(self, marker_id: int, visit: int, pos: np.ndarray):
+        m = Marker()
+        m.header.frame_id = 'map'
+        m.header.stamp = self.get_clock().now().to_msg()
+        m.ns = 'waypoint_estimates'
+        m.id = marker_id * 100 + visit
+        m.type = Marker.SPHERE
+        m.action = Marker.ADD
+        m.pose.position.x = float(pos[0])
+        m.pose.position.y = float(pos[1])
+        m.pose.position.z = float(pos[2])
+        m.pose.orientation.w = 1.0
+        m.scale.x = m.scale.y = m.scale.z = 0.3
+        m.color.r = 1.0
+        m.color.g = 0.0
+        m.color.b = 1.0
+        m.color.a = 0.9
+        self._wp_markers.markers.append(m)
+        self._pub_waypoints.publish(self._wp_markers)
+
+    def close(self):
+        """CSV 마무리 저장. main()의 종료 처리에서 호출."""
+        self._finalize_waypoint_episode()
+        try:
+            self._wp_csv_f.close()
+        except Exception:
+            pass
+        self.get_logger().info(f'경로점 추정 결과 저장: {self._wp_csv_path}')
 
     # ------------------------------------------------------------------
     # PointCloud2 utilities
@@ -721,12 +850,14 @@ class LidarDroneTracker(Node):
 # ---------------------------------------------------------------------------
 def main():
     rclpy.init()
+    node = None
     try:
         node = LidarDroneTracker()
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
-    except SystemExit:
-        pass
     finally:
+        if node is not None:
+            node.close()
+            node.destroy_node()
         rclpy.try_shutdown()

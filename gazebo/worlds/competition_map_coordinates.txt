@@ -85,5 +85,5 @@
   id=4  (x=12.8571, y=12.0)  model=aruco_marker_id4_at_x13_y12
 
 === 지상 고정 LiDAR 2대 (측위 시스템, 금지구역 33x23 밖) ===
-  ground_lidar_1  world=(-1.5, -1.5, 1.5)  yaw=0.6094 rad  topic=/ouster1/points
-  ground_lidar_2  world=(31.5, 21.5, 1.5)  yaw=-2.5322 rad  topic=/ouster2/points
+  ground_lidar_1  world=(-1.5, -1.5, 1.5)  yaw=0.6094 rad  topic=/lidar1/points
+  ground_lidar_2  world=(31.5, 21.5, 1.5)  yaw=-2.5322 rad  topic=/lidar2/points

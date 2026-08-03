@@ -28,6 +28,8 @@ setup(
             'lidar_drone_tracker = drone_localization.lidar_drone_tracker:main',
             'flight_recorder = drone_localization.flight_recorder:main',
             'plot_flight = drone_localization.plot_flight:main',
+            'analyze_waypoints = drone_localization.analyze_waypoints:main',
+            'plot_flight_3d = drone_localization.plot_flight_3d:main',
         ],
     },
 )

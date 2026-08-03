@@ -353,7 +353,7 @@
 
     <!-- 지상 고정 LiDAR 2대 (측위용, 33x23 금지구역 밖, 동쪽+북쪽 직교 배치) -->
 
-    <!-- 지상 고정 LiDAR: ground_lidar_1 @ world (-1.5, -1.5, 1.5), yaw=0.6094 rad, topic /ouster1/points -->
+    <!-- 지상 고정 LiDAR: ground_lidar_1 @ world (-1.5, -1.5, 1.5), yaw=0.6094 rad, topic /lidar1/points -->
     <model name="ground_lidar_1">
       <static>true</static>
       <pose>-1.5 -1.5 1.5 0.0 0.0 0.6094</pose>
@@ -392,7 +392,7 @@
         <sensor name="ground_lidar_1_lidar" type="gpu_lidar">
           <always_on>1</always_on>
           <update_rate>10</update_rate>
-          <topic>/ouster1</topic>
+          <topic>/lidar1</topic>
           <gz_frame_id>ground_lidar_1_frame</gz_frame_id>
           <visualize>true</visualize>
           <lidar>
@@ -424,7 +424,7 @@
         </sensor>
       </link>
     </model>
-    <!-- 지상 고정 LiDAR: ground_lidar_2 @ world (31.5, 21.5, 1.5), yaw=-2.5322 rad, topic /ouster2/points -->
+    <!-- 지상 고정 LiDAR: ground_lidar_2 @ world (31.5, 21.5, 1.5), yaw=-2.5322 rad, topic /lidar2/points -->
     <model name="ground_lidar_2">
       <static>true</static>
       <pose>31.5 21.5 1.5 0.0 0.0 -2.5322</pose>
@@ -463,7 +463,7 @@
         <sensor name="ground_lidar_2_lidar" type="gpu_lidar">
           <always_on>1</always_on>
           <update_rate>10</update_rate>
-          <topic>/ouster2</topic>
+          <topic>/lidar2</topic>
           <gz_frame_id>ground_lidar_2_frame</gz_frame_id>
           <visualize>true</visualize>
           <lidar>

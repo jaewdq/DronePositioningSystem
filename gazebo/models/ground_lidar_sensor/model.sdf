@@ -66,17 +66,21 @@
         <topic>:
           <topic>            → gz.msgs.LaserScan        (2D scan)
           <topic>/points     → gz.msgs.PointCloudPacked (3D cloud)
-        So we set <topic>/ouster</topic> and the 3D cloud lands on
-        gz topic /ouster/points, which ros_gz_bridge maps to the ROS2
-        /ouster/points topic the tracker node subscribes to.
+        So we set <topic>/lidar1</topic> (or /lidar2 for the second unit) and
+        the 3D cloud lands on gz topic /lidar1/points, which ros_gz_bridge
+        maps to the ROS2 /lidar1/points topic the tracker node subscribes to
+        (naming matches the real-hardware convention used by
+        lidar_extrinsic_calib).
       -->
-      <sensor name="ouster_os0_lidar" type="gpu_lidar">
+      <sensor name="os0_sr_lidar" type="gpu_lidar">
         <always_on>1</always_on>
         <update_rate>10</update_rate>
-        <!-- base topic; 3D cloud is auto-published on <topic>/points -->
-        <topic>/ouster</topic>
+        <!-- base topic; 3D cloud is auto-published on <topic>/points.
+             Placeholder here — generate_competition_map.py sets the real
+             per-instance topic (/lidar1 or /lidar2) when spawning two of these. -->
+        <topic>/lidar1</topic>
         <!-- frame_id used in PointCloud2 header after bridging -->
-        <gz_frame_id>ouster_frame</gz_frame_id>
+        <gz_frame_id>lidar1_frame</gz_frame_id>
         <!-- Show the laser rays in the gz sim GUI (direct child of <sensor>).
              Set to false if the 64×1024 ray fan slows the GUI down. -->
         <visualize>true</visualize>

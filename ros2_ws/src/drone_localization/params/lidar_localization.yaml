@@ -32,7 +32,7 @@ lidar_drone_tracker:
     # ---------------------------------------------------------------
 
     # --- LiDAR 1: landpad corner (south-west), facing field center ---
-    lidar1_topic: "/ouster1/points"
+    lidar1_topic: "/lidar1/points"
     lidar1_x:     -1.5
     lidar1_y:     -1.5
     lidar1_z:      1.5
@@ -41,9 +41,7 @@ lidar_drone_tracker:
     lidar1_yaw:    0.6094     # faces field center (15,10) from SW corner
 
     # --- LiDAR 2: diagonal corner (north-east), facing field center ---
-    # Set enable_lidar2: false to run with LiDAR 1 only.
-    enable_lidar2: true
-    lidar2_topic: "/ouster2/points"
+    lidar2_topic: "/lidar2/points"
     lidar2_x:     31.5
     lidar2_y:     21.5
     lidar2_z:      1.5
@@ -63,30 +61,17 @@ lidar_drone_tracker:
     voxel_leaf_size: 0.05
 
     # ---------------------------------------------------------------
-    # ROI filter (world frame, with 2m margin beyond 30x20 field)
+    # ROI filter. X/Y: 2m margin beyond the 30x20 field.
+    # Z: hover-altitude band only (1.0-3.0m) — this is the ONLY height
+    # filter in the pipeline. Ground-state (pre-liftoff/post-landing)
+    # tracking is out of scope, so the floor is simply never in view.
     # ---------------------------------------------------------------
     roi_x_min: -2.0
     roi_x_max: 32.0
     roi_y_min: -2.0
     roi_y_max: 22.0
-    roi_z_min:  0.0
-    roi_z_max:  6.0
-
-    # ---------------------------------------------------------------
-    # RANSAC ground plane removal
-    #
-    # distance_threshold=5cm: thick enough to capture the grid-line
-    # decals painted on the floor (effectively z≈0), slim enough to
-    # exclude the drone at ≥0.5m.
-    #
-    # ground_inlier_min_ratio=20%: RANSAC must claim at least 20% of
-    # post-ROI points as inliers before we trust it as "the ground".
-    # Prevents accidentally removing a false-positive plane through
-    # the drone body or a clustered rain artifact.
-    # ---------------------------------------------------------------
-    ransac_distance_threshold: 0.05
-    ransac_max_iterations:     100
-    ground_inlier_min_ratio:   0.20
+    roi_z_min:  1.0
+    roi_z_max:  3.0
 
     # ---------------------------------------------------------------
     # Statistical outlier removal  (rain / scatter noise suppression)
@@ -109,8 +94,8 @@ lidar_drone_tracker:
     #   still well below the spacing to any other object in the open field.
     # min_points=2: at long range a single LiDAR yields only 2-4 hits on the
     #   50cm drone. 3 was dropping detections intermittently; 2 recovers them.
-    #   (False 2-point noise clusters are rejected by the height filter and
-    #    the nearest-to-track selection.)
+    #   (False 2-point noise clusters are rejected by the nearest-to-track
+    #    selection below — the ROI z-band already keeps the ground out.)
     # max_points=400: drone at closest approach rarely exceeds this.
     # ---------------------------------------------------------------
     cluster_tolerance:  0.40
@@ -118,37 +103,22 @@ lidar_drone_tracker:
     cluster_max_points: 400
 
     # ---------------------------------------------------------------
-    # Drone height validity range (world frame Z)
-    #
-    # min_drone_height=0.05m: low enough to recognise the drone SITTING ON
-    #   the pad (centroid ~0.15m) from the very start, not just once airborne.
-    #   Ground-fixed obstacles are rejected instead by the home-seed +
-    #   nearest-to-track selection + association gate below.
-    # ---------------------------------------------------------------
-    min_drone_height: 0.05
-    max_drone_height: 5.5
-
-    # ---------------------------------------------------------------
     # Home-seed + association gate
     #
-    # The drone always starts on a known pad (0,0). Seeding the EKF there
-    # locks tracking from the ground and makes selection prefer the pad
-    # cluster; max_assoc_dist rejects any cluster farther than 3m from the
-    # prediction (stops the airborne track snapping onto a ground residual).
+    # The drone is expected to first appear in the hover band. Seeding the
+    # KF there lets early-frame candidate selection prefer the nearest
+    # cluster to that prior instead of falling back to cold-start
+    # (largest cluster); max_assoc_dist rejects any cluster farther than
+    # this from the current prediction.
     # ---------------------------------------------------------------
     seed_at_home: true
     home_x: 0.0
     home_y: 0.0
-    home_z: 0.15
-    # 1.5m gate: an airborne drone (z=2) has a ground residual ~1.9m below it
-    # (esp. over grid lines during line-tracing). A 3m gate let the track snap
-    # DOWN onto that residual; 1.5m rejects it → the EKF coasts at altitude and
-    # re-acquires the real drone instead of falling to the floor. Still large
-    # enough to re-lock after a 1.5s coast (drone moves ~1.1m).
+    home_z: 2.0
     max_assoc_dist: 1.5
 
     # ---------------------------------------------------------------
-    # EKF noise parameters
+    # KF noise parameters
     #
     # proc_noise_pos: position can shift ~5cm between frames (10Hz).
     #   Accounts for model error in constant-velocity assumption.
@@ -158,7 +128,7 @@ lidar_drone_tracker:
     # meas_noise_pos=15cm: composed of
     #   • raw LiDAR range noise:       0.8cm (gaussian, per-point)
     #   • centroid estimation error:   ~5–15cm (sparse side-view cluster)
-    #   Conservative value to keep the EKF from over-trusting noisy
+    #   Conservative value to keep the KF from over-trusting noisy
     #   centroids when the drone is partially occluded.
     # ---------------------------------------------------------------
     proc_noise_pos: 0.05
@@ -168,9 +138,38 @@ lidar_drone_tracker:
     # ---------------------------------------------------------------
     # Coasting (pure-predict when no cluster detected)
     # 15 frames = 1.5s at 10Hz. At long range detection is intermittent
-    # (few points), so the EKF must bridge short gaps with constant-velocity
+    # (few points), so the KF must bridge short gaps with constant-velocity
     # prediction instead of declaring LOST every half second.
+    #
+    # reset_after_frames: beyond this, drop the KF entirely (cold-start) so
+    # the next detection is free to re-lock on the largest cluster instead
+    # of being gated against a stale, long-since-wrong prediction.
     # ---------------------------------------------------------------
     coast_max_frames: 15
+    reset_after_frames: 50
 
     lidar_update_rate: 10.0
+
+    # ---------------------------------------------------------------
+    # Waypoint(마커) 호버 감지 + 위치 재추정
+    #
+    # 대회 규정에 마커 위 호버 시간이 정해져 있지 않고 팀마다 체류 패턴이
+    # 다르므로, 고정 시간이 아니라 "느림 + 근접" 조건으로 판정한다.
+    # 채점기준 "경로점 위치추정" 하 등급이 <4m이므로, 게이트 반경은 이보다
+    # 여유있게 잡아 항법이 부정확한 팀도 표본을 놓치지 않게 한다.
+    # ---------------------------------------------------------------
+    waypoint_gate_radius: 4.5       # m
+    waypoint_speed_threshold: 0.25  # m/s
+    waypoint_min_frames: 4          # ~0.4s @ 10Hz
+    waypoint_grace_frames: 5        # ~0.5s @ 10Hz, 짧은 이탈 유예 (호버 조각남 방지)
+
+    # 마커 좌표. gazebo/worlds/generate_competition_map.py 의 marker_coords와
+    # 항상 동일하게 유지할 것 (LIDARS 좌표와 같은 방식으로 수동 동기화).
+    marker1_x: 4.2857
+    marker1_y: 4.0
+    marker2_x: 4.2857
+    marker2_y: 16.0
+    marker3_x: 25.7143
+    marker3_y: 4.0
+    marker4_x: 12.8571
+    marker4_y: 12.0

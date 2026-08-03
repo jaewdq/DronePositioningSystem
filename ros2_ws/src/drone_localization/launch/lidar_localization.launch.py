@@ -1,53 +1,68 @@
 """
 Launch file for the two-LiDAR drone localization system.
 
-The two ground LiDARs are now baked into the world (competition_map.sdf),
-so this launch does NOT spawn them. It only:
-  1. Bridges /ouster1/points and /ouster2/points  (Gazebo → ROS2 PointCloud2)
-  2. Starts the lidar_drone_tracker node (fuses both clouds, EKF tracking)
+The two ground LiDARs are now baked into the world (competition_map.sdf or
+competition_map_os1.sdf), so this launch does NOT spawn them. It only:
+  1. Bridges /lidar1/points and /lidar2/points  (Gazebo → ROS2 PointCloud2)
+  2. Starts the lidar_drone_tracker node (fuses both clouds, KF tracking)
+  3. Publishes a static identity transform (map -> world)
+
+Nothing in this pipeline publishes TF (everything is already expressed
+directly in the world/map frame), but RViz2 needs at least one /tf or
+/tf_static message before it will resolve Fixed Frame "map" and render
+anything — hence the static_transform_publisher below. It's a no-op
+otherwise (identity transform, no effect on any coordinate computed
+upstream in the tracker).
 
 Prerequisites (separate terminals, started first):
   Terminal 1: cd ~/drone_project/PX4-Autopilot
               PX4_GZ_WORLD=competition_map make px4_sitl gz_x500
               → loads the world with ground_lidar_1 (east) + ground_lidar_2 (north)
+              (OS1-128 instead: PX4_GZ_WORLD=competition_map_os1)
 
   Terminal 2: MicroXRCEAgent udp4 -p 8888
 
   Terminal (optional, to actually fly):
               ros2 run drone_mission competition_mission
 
-Usage:
+Usage (OS0-SR, default):
   ros2 launch drone_localization lidar_localization.launch.py
 
-Run with a single LiDAR:
-  ros2 launch drone_localization lidar_localization.launch.py enable_lidar2:=false
+Usage (OS1-128):
+  ros2 launch drone_localization lidar_localization.launch.py \\
+      params_file:=lidar_localization_os1.yaml
 
 Visualise (optional):
   ros2 run rviz2 rviz2 -f map
     Add: /drone/estimated_pose, /lidar/filtered_points, /lidar/cluster_markers
+    (TF is provided by this launch file now, so displays should go green
+     without needing a separate static_transform_publisher.)
 
 NOTE: If you change a LiDAR pose, edit it in BOTH
-  - Tools/simulation/gz/worlds/generate_competition_map.py (LIDARS) + regenerate
-  - params/lidar_localization.yaml (lidarN_*)
-so the physical sensor and the node's transform stay in sync.
+  - Tools/simulation/gz/worlds/generate_competition_map*.py (LIDARS) + regenerate
+  - params/lidar_localization*.yaml (lidarN_*)
+so the physical sensor and the node's transform stay in sync. The OS0-SR and
+OS1-128 configs are separate world+yaml pairs — always match the world you
+launched with the matching params_file.
 """
-
-import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('drone_localization')
-    params_file = os.path.join(pkg_share, 'params', 'lidar_localization.yaml')
 
-    enable_lidar2 = ParameterValue(
-        LaunchConfiguration('enable_lidar2'), value_type=bool)
+    params_file_arg = DeclareLaunchArgument(
+        'params_file', default_value='lidar_localization.yaml',
+        description='Params filename under params/. '
+                     'lidar_localization.yaml = OS0-SR (default), '
+                     'lidar_localization_os1.yaml = OS1-128.')
+    params_path = PathJoinSubstitution(
+        [pkg_share, 'params', LaunchConfiguration('params_file')])
 
     # ------------------------------------------------------------------
     # Bridge the two 3D point-cloud topics: Gazebo PointCloudPacked → ROS2
@@ -58,10 +73,10 @@ def generate_launch_description():
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        name='ouster_bridge',
+        name='lidar_bridge',
         arguments=[
-            '/ouster1/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
-            '/ouster2/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
+            '/lidar1/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
+            '/lidar2/points@sensor_msgs/msg/PointCloud2[gz.msgs.PointCloudPacked',
         ],
         output='screen',
     )
@@ -71,16 +86,22 @@ def generate_launch_description():
         executable='lidar_drone_tracker',
         name='lidar_drone_tracker',
         output='screen',
-        parameters=[
-            params_file,
-            {'enable_lidar2': enable_lidar2},
-        ],
+        parameters=[params_path],
+    )
+
+    # Identity transform so RViz2 has TF data to resolve Fixed Frame "map"
+    # (see module docstring). Args are positional in tf2_ros on Humble:
+    # x y z yaw pitch roll parent_frame child_frame.
+    static_tf = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='map_world_static_tf',
+        arguments=['0', '0', '0', '0', '0', '0', 'map', 'world'],
     )
 
     return LaunchDescription([
-        DeclareLaunchArgument(
-            'enable_lidar2', default_value='true',
-            description='Use the second (north) LiDAR. false = single-LiDAR mode.'),
+        params_file_arg,
         bridge,
         tracker,
+        static_tf,
     ])

@@ -35,9 +35,12 @@ from typing import List, NamedTuple, Optional, Tuple
 # ===========================================================================
 ALTITUDE = 2.0              # 비행 고도 (m) — 대회 규정 TBR 값
 VERTICAL_SPEED = 0.5        # 이착륙 수직 속도 (m/s)
-HORIZONTAL_SPEED = 0.75     # 수평 이동 속도 (m/s), 규정 권장 범위 0.5~1.0 m/s
+HORIZONTAL_SPEED = 1.5      # 수평 이동 속도 (m/s) — 규정집에 속도 제한 없음(확인함).
+                             # 빠를수록 Line Tracing 채점(고도침하/구획선이탈, 70점)엔
+                             # 불리해질 여지가 있으니 참고.
 DT = 0.1                    # 샘플링 주기 (초). 측위 시스템 샘플링레이트에 맞춰 0.05~0.1 권장
-HOVER_DURATION = 2.0        # 마커 도착 시 호버링 시간 (초)
+HOVER_DURATION = 4.0        # 마커 도착 시 호버링 시간 (초) — LiDAR가 정지 인식하고
+                             # 정밀 위치를 낼 시간을 벌기 위해 2초→4초로 늘림
 
 SMOOTH_YAW_TURNS = False    # True면 코너마다 짧은 제자리 회전 구간을 별도로 삽입해 yaw를 보간
 YAW_TURN_DURATION = 0.5     # SMOOTH_YAW_TURNS=True일 때 회전에 걸리는 시간 (초)
