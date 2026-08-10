@@ -30,6 +30,12 @@ setup(
             'plot_flight = drone_localization.plot_flight:main',
             'analyze_waypoints = drone_localization.analyze_waypoints:main',
             'plot_flight_3d = drone_localization.plot_flight_3d:main',
+            'evaluate_accuracy = drone_localization.evaluate_accuracy:main',
+            'plot_accuracy = drone_localization.plot_accuracy:main',
+            'plot_cluster_shape = drone_localization.plot_cluster_shape:main',
+            'archive_run = drone_localization.archive_run:main',
+            'plot_runs = drone_localization.plot_runs:main',
+            'plot_spatial = drone_localization.plot_spatial:main',
         ],
     },
 )

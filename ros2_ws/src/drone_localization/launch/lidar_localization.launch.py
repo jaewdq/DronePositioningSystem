@@ -86,7 +86,12 @@ def generate_launch_description():
         executable='lidar_drone_tracker',
         name='lidar_drone_tracker',
         output='screen',
-        parameters=[params_path],
+        parameters=[
+            params_path,
+            # 비었으면 트래커가 덤프를 끈다. 켜려면:
+            #   cluster_dump_path:=~/drone_project/flight_logs/clusters.npz
+            {'cluster_dump_path': LaunchConfiguration('cluster_dump_path')},
+        ],
     )
 
     # Identity transform so RViz2 has TF data to resolve Fixed Frame "map"
@@ -101,6 +106,10 @@ def generate_launch_description():
 
     return LaunchDescription([
         params_file_arg,
+        DeclareLaunchArgument(
+            'cluster_dump_path', default_value='',
+            description='선택된 드론 클러스터의 원본 점들을 npz로 저장할 경로. '
+                        '비우면 저장하지 않음 (plot_cluster_shape 로 확인).'),
         bridge,
         tracker,
         static_tf,

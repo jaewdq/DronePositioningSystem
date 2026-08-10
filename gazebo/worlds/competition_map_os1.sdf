@@ -30,12 +30,23 @@
 
     <scene>
       <grid>false</grid>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.7 0.7 0.7 1</background>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <!-- <sky>가 렌더링되면 background는 가려지지만, 스카이돔을 지원하지
+           않는 렌더러/헤드리스에서는 이 하늘색이 그대로 배경이 된다. -->
+      <background>0.53 0.72 0.92 1</background>
       <shadows>true</shadows>
+      <sky>
+        <clouds>
+          <speed>2.5</speed>
+          <direction>0.7</direction>
+          <humidity>0.55</humidity>
+          <mean_size>0.35</mean_size>
+        </clouds>
+      </sky>
     </scene>
 
-    <!-- 바닥: 임무구역과 대비되는 밝은 회색 바닥 -->
+    <!-- 바닥(먼 배경 + 충돌면): 잔디 텍스처 박스 바깥으로 이어지는 벌판.
+         텍스처 없이 잔디색 단색이라 지평선까지 자연스럽게 이어진다. -->
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -60,9 +71,9 @@
             </plane>
           </geometry>
           <material>
-            <ambient>0.85 0.85 0.83 1</ambient>
-            <diffuse>0.85 0.85 0.83 1</diffuse>
-            <specular>0.2 0.2 0.2 1</specular>
+            <ambient>0.24 0.34 0.16 1</ambient>
+            <diffuse>0.40 0.55 0.26 1</diffuse>
+            <specular>0.02 0.02 0.02 1</specular>
           </material>
         </visual>
         <pose>0 0 0 0 -0 0</pose>
@@ -80,18 +91,28 @@
       <self_collide>false</self_collide>
     </model>
 
-    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드 -->
+    <!-- 잔디 바닥 (경기장 + 여유 6.0m, 타일링 텍스처).
+         상단면이 정확히 z=0.001가 되도록 두께 절반만큼 내려서 배치. -->
+    <include>
+      <uri>model://arena_ground</uri>
+      <name>arena_ground</name>
+      <pose>15.0 10.0 0.0 0 0 0</pose>
+    </include>
+
+    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드.
+         바닥이 잔디(녹색)라 기존 녹색 패드는 묻혀서 안 보이므로 흰색 계열로. -->
     <model name="home_pad">
       <static>true</static>
-      <pose>0 0 0.0015 0 0 0</pose>
+      <pose>0 0 0.005 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <cylinder><radius>0.5</radius><length>0.001</length></cylinder>
           </geometry>
           <material>
-            <ambient>0.1 0.7 0.2 1</ambient>
-            <diffuse>0.1 0.7 0.2 1</diffuse>
+            <ambient>0.90 0.90 0.88 1</ambient>
+            <diffuse>0.98 0.98 0.96 1</diffuse>
+            <emissive>0.22 0.22 0.20 1</emissive>
           </material>
         </visual>
       </link>
@@ -101,224 +122,238 @@
 
     <model name="gridline_v_1">
       <static>true</static>
-      <pose>0.0 10.0 0.001 0 0 0</pose>
+      <pose>0.0 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_2">
       <static>true</static>
-      <pose>4.2857 10.0 0.001 0 0 0</pose>
+      <pose>4.2857 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_3">
       <static>true</static>
-      <pose>8.5714 10.0 0.001 0 0 0</pose>
+      <pose>8.5714 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_4">
       <static>true</static>
-      <pose>12.8571 10.0 0.001 0 0 0</pose>
+      <pose>12.8571 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_5">
       <static>true</static>
-      <pose>17.1429 10.0 0.001 0 0 0</pose>
+      <pose>17.1429 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_6">
       <static>true</static>
-      <pose>21.4286 10.0 0.001 0 0 0</pose>
+      <pose>21.4286 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_7">
       <static>true</static>
-      <pose>25.7143 10.0 0.001 0 0 0</pose>
+      <pose>25.7143 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_v_8">
       <static>true</static>
-      <pose>30.0 10.0 0.001 0 0 0</pose>
+      <pose>30.0 10.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.001</size></box>
+            <box><size>0.1 20.0 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_9">
       <static>true</static>
-      <pose>15.0 0.0 0.001 0 0 0</pose>
+      <pose>15.0 0.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_10">
       <static>true</static>
-      <pose>15.0 4.0 0.001 0 0 0</pose>
+      <pose>15.0 4.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_11">
       <static>true</static>
-      <pose>15.0 8.0 0.001 0 0 0</pose>
+      <pose>15.0 8.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_12">
       <static>true</static>
-      <pose>15.0 12.0 0.001 0 0 0</pose>
+      <pose>15.0 12.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_13">
       <static>true</static>
-      <pose>15.0 16.0 0.001 0 0 0</pose>
+      <pose>15.0 16.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
     </model>
     <model name="gridline_h_14">
       <static>true</static>
-      <pose>15.0 20.0 0.001 0 0 0</pose>
+      <pose>15.0 20.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.001</size></box>
+            <box><size>30.0 0.1 0.002</size></box>
           </geometry>
           <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
           </material>
         </visual>
       </link>
@@ -330,25 +365,25 @@
     <include>
       <uri>model://aruco_marker_id1_at_x4_y4</uri>
       <name>aruco_marker_id1_at_x4_y4</name>
-      <pose>4.2857 4.0 0.002 0 0 0</pose>
+      <pose>4.2857 4.0 0.005 0 0 0</pose>
     </include>
     <!-- 경로점 id=2: (4.2857, 16.0) -->
     <include>
       <uri>model://aruco_marker_id2_at_x4_y16</uri>
       <name>aruco_marker_id2_at_x4_y16</name>
-      <pose>4.2857 16.0 0.002 0 0 0</pose>
+      <pose>4.2857 16.0 0.005 0 0 0</pose>
     </include>
     <!-- 경로점 id=3: (25.7143, 4.0) -->
     <include>
       <uri>model://aruco_marker_id3_at_x26_y4</uri>
       <name>aruco_marker_id3_at_x26_y4</name>
-      <pose>25.7143 4.0 0.002 0 0 0</pose>
+      <pose>25.7143 4.0 0.005 0 0 0</pose>
     </include>
     <!-- 경로점 id=4: (12.8571, 12.0) -->
     <include>
       <uri>model://aruco_marker_id4_at_x13_y12</uri>
       <name>aruco_marker_id4_at_x13_y12</name>
-      <pose>12.8571 12.0 0.002 0 0 0</pose>
+      <pose>12.8571 12.0 0.005 0 0 0</pose>
     </include>
 
     <!-- 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용, 33x23 금지구역 밖) -->

@@ -25,15 +25,24 @@ WORLDS_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(os.path.dirname(WORLDS_DIR), "models")
 sys.path.insert(0, MODELS_DIR)
 from generate_aruco_markers import generate_marker  # noqa: E402
+from generate_ground_texture import generate_ground_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # 맵 사양 (대회 규정집 기준) — generate_competition_map.py와 완전히 동일
 # ---------------------------------------------------------------------------
 AREA_X = 30.0
 AREA_Y = 20.0
-LINE_WIDTH = 0.10
-LINE_THICKNESS = 0.001
-MARKER_Z = 0.002
+LINE_WIDTH = 0.10       # 구획선 폭 10cm (규정)
+
+# 바닥 적층 순서 (z-fighting 방지). 아래에서 위로:
+#   ground_plane(0) < 잔디(GRASS_TOP_Z) < 구획선(LINE_Z) < 마커(MARKER_Z)
+# 각 층은 자기 두께만큼 공간을 차지하므로 간격을 두께보다 크게 잡는다.
+GRASS_THICKNESS = 0.002
+GRASS_TOP_Z = 0.001                     # 잔디 상단면 높이
+GRASS_MARGIN = 6.0                      # 경기장 밖으로 잔디를 더 깔 여유 (m)
+LINE_THICKNESS = 0.002
+LINE_Z = GRASS_TOP_Z + LINE_THICKNESS   # 구획선 중심 높이 → 상단 0.005
+MARKER_Z = LINE_Z + 0.002               # 마커는 구획선 위
 
 N_CELLS_X = 7
 N_CELLS_Y = 5
@@ -85,6 +94,14 @@ LIDARS = [
     ("ground_lidar_2", "/lidar2", 15.0, 21.5, 2.0, 0.0, 0.0, -1.5708),  # 북쪽, 필드중앙X, 남향
 ]
 
+# GUI에 LiDAR 레이(파란 부채꼴)를 그릴지 여부.
+# OS1-128은 1024 x 128 = 131,072 레이 x 2대 = 262,144개를 매 프레임 그려야 해서
+# (OS0-SR 64ch의 2배) 켜두면 드론 스폰 직후 뷰포트 조작이 사실상 불가능해진다.
+# 레이를 꺼도 포인트클라우드 발행에는 전혀 영향이 없다 — 측위 동작은 동일하고,
+# 점을 보고 싶으면 RViz2의 /lidar1,2/points 를 쓰면 된다.
+# 센서 방향을 눈으로 확인해야 할 때만 잠깐 True로 바꿔 재생성할 것.
+LIDAR_VISUALIZE = True
+
 # ---------------------------------------------------------------------------
 # 1) ArUco 마커 모델 생성 (PNG + model.config/model.sdf) — OS0-SR 버전과 좌표 동일,
 #    같은 디렉토리를 재생성(덮어쓰기)하므로 두 world가 같은 마커 모델을 공유함.
@@ -95,11 +112,26 @@ for marker_id, x, y in markers:
     marker_model_names.append(name)
     print(f"마커 생성: {name}  (x={x}, y={y})")
 
+# 잔디 바닥 모델 (텍스처 PNG 포함) 생성
+ground_model_name, _tex_px, _ground_span = generate_ground_model(
+    MODELS_DIR, area_x=AREA_X, area_y=AREA_Y, margin=GRASS_MARGIN)
+print(f"잔디 바닥 생성: {ground_model_name}  "
+      f"({_ground_span[0]}x{_ground_span[1]}m, 텍스처 {_tex_px[0]}x{_tex_px[1]}px)")
+
 
 # ---------------------------------------------------------------------------
 # 2) SDF 조각 생성 함수들
 # ---------------------------------------------------------------------------
 def grid_line_models() -> str:
+    """구획선: 폭 10cm 흰색. 잔디 위에서 확실히 보이도록 흰색을 쓰고,
+    emissive를 약간 넣어 그림자 진 쪽에서도 회색으로 죽지 않게 한다."""
+    line_material = '''
+          <material>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
+          </material>'''
     parts = []
     idx = 0
     for x in x_positions:
@@ -107,17 +139,12 @@ def grid_line_models() -> str:
         parts.append(f'''
     <model name="gridline_v_{idx}">
       <static>true</static>
-      <pose>{x} {AREA_Y / 2} {LINE_THICKNESS} 0 0 0</pose>
+      <pose>{x} {AREA_Y / 2} {LINE_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box><size>{LINE_WIDTH} {AREA_Y} {LINE_THICKNESS}</size></box>
-          </geometry>
-          <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-          </material>
+          </geometry>{line_material}
         </visual>
       </link>
     </model>''')
@@ -126,17 +153,12 @@ def grid_line_models() -> str:
         parts.append(f'''
     <model name="gridline_h_{idx}">
       <static>true</static>
-      <pose>{AREA_X / 2} {y} {LINE_THICKNESS} 0 0 0</pose>
+      <pose>{AREA_X / 2} {y} {LINE_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box><size>{AREA_X} {LINE_WIDTH} {LINE_THICKNESS}</size></box>
-          </geometry>
-          <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-          </material>
+          </geometry>{line_material}
         </visual>
       </link>
     </model>''')
@@ -209,7 +231,7 @@ def lidar_models() -> str:
           <update_rate>10</update_rate>
           <topic>{topic}</topic>
           <gz_frame_id>{name}_frame</gz_frame_id>
-          <visualize>true</visualize>
+          <visualize>{'true' if LIDAR_VISUALIZE else 'false'}</visualize>
           <lidar>
             <scan>
               <horizontal>
@@ -274,12 +296,23 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
 
     <scene>
       <grid>false</grid>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.7 0.7 0.7 1</background>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <!-- <sky>가 렌더링되면 background는 가려지지만, 스카이돔을 지원하지
+           않는 렌더러/헤드리스에서는 이 하늘색이 그대로 배경이 된다. -->
+      <background>0.53 0.72 0.92 1</background>
       <shadows>true</shadows>
+      <sky>
+        <clouds>
+          <speed>2.5</speed>
+          <direction>0.7</direction>
+          <humidity>0.55</humidity>
+          <mean_size>0.35</mean_size>
+        </clouds>
+      </sky>
     </scene>
 
-    <!-- 바닥: 임무구역과 대비되는 밝은 회색 바닥 -->
+    <!-- 바닥(먼 배경 + 충돌면): 잔디 텍스처 박스 바깥으로 이어지는 벌판.
+         텍스처 없이 잔디색 단색이라 지평선까지 자연스럽게 이어진다. -->
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -304,9 +337,9 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
             </plane>
           </geometry>
           <material>
-            <ambient>0.85 0.85 0.83 1</ambient>
-            <diffuse>0.85 0.85 0.83 1</diffuse>
-            <specular>0.2 0.2 0.2 1</specular>
+            <ambient>0.24 0.34 0.16 1</ambient>
+            <diffuse>0.40 0.55 0.26 1</diffuse>
+            <specular>0.02 0.02 0.02 1</specular>
           </material>
         </visual>
         <pose>0 0 0 0 -0 0</pose>
@@ -324,18 +357,28 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
       <self_collide>false</self_collide>
     </model>
 
-    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드 -->
+    <!-- 잔디 바닥 (경기장 + 여유 {GRASS_MARGIN}m, 타일링 텍스처).
+         상단면이 정확히 z={GRASS_TOP_Z}가 되도록 두께 절반만큼 내려서 배치. -->
+    <include>
+      <uri>model://{ground_model_name}</uri>
+      <name>{ground_model_name}</name>
+      <pose>{AREA_X / 2} {AREA_Y / 2} {GRASS_TOP_Z - GRASS_THICKNESS / 2} 0 0 0</pose>
+    </include>
+
+    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드.
+         바닥이 잔디(녹색)라 기존 녹색 패드는 묻혀서 안 보이므로 흰색 계열로. -->
     <model name="home_pad">
       <static>true</static>
-      <pose>0 0 0.0015 0 0 0</pose>
+      <pose>0 0 {MARKER_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <cylinder><radius>0.5</radius><length>0.001</length></cylinder>
           </geometry>
           <material>
-            <ambient>0.1 0.7 0.2 1</ambient>
-            <diffuse>0.1 0.7 0.2 1</diffuse>
+            <ambient>0.90 0.90 0.88 1</ambient>
+            <diffuse>0.98 0.98 0.96 1</diffuse>
+            <emissive>0.22 0.22 0.20 1</emissive>
           </material>
         </visual>
       </link>

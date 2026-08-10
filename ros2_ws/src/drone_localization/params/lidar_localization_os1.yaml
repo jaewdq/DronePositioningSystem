@@ -122,6 +122,13 @@ lidar_drone_tracker:
     home_y: 0.0
     home_z: 2.0
     max_assoc_dist: 1.5
+    # 게이트는 고정이 아니라 KF의 위치 불확실성에 비례해 넓어진다.
+    # 고정 게이트는 예측이 한 번 밀리면 진짜 드론까지 거부해버려
+    # 스스로 회복하지 못하는 악순환을 만든다 (실측: 중앙값 1.13m에서
+    # 이탈이 시작돼 매번 약 3.8초 공백 발생).
+    #   유효 게이트 = max_assoc_dist + gate_sigma_k x sigma  (상한 cap)
+    gate_sigma_k: 3.0
+    max_assoc_dist_cap: 4.0
 
     # ---------------------------------------------------------------
     # KF noise parameters

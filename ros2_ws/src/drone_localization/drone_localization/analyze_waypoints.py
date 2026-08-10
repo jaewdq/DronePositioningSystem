@@ -22,6 +22,18 @@ lidar_drone_tracker.py 안의 실시간 판정(_update_waypoint_tracking)과 달
 import argparse
 import csv
 import os
+import sys
+
+# ROS 노드가 아니라 오프라인 분석 스크립트이므로 `python3 analyze_waypoints.py` 로도
+# 바로 돌아가야 한다. 직접 실행하면 형제 패키지를 못 찾으므로, 소스 트리
+# 위치를 스스로 계산해 sys.path에 넣는다. (colcon 설치본으로 실행할 때는
+# 이미 경로가 잡혀 있어 아래 삽입이 무해하게 무시된다.)
+_HERE = os.path.dirname(os.path.abspath(__file__))
+for _p in (os.path.dirname(_HERE),
+           os.path.join(os.path.dirname(os.path.dirname(_HERE)),
+                        'drone_mission')):
+    if os.path.isdir(_p) and _p not in sys.path:
+        sys.path.insert(0, _p)
 
 import numpy as np
 

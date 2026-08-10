@@ -166,6 +166,10 @@ class LidarDroneTracker(Node):
             self._kf.init(self.home_xyz.copy())
         self._coast_count = 0
 
+        # 클러스터 모양 덤프 (cluster_dump_path 가 설정된 경우에만 수집)
+        self._dump = [] if self.cluster_dump_path else None
+        self._last_sel_pts = None
+
         # Waypoint (마커) 호버 감지 상태
         self._wp_active_id = None
         self._wp_samples = []
@@ -195,6 +199,17 @@ class LidarDroneTracker(Node):
         n = len(self._sensors)
         self._stat_sensor_pts = [0] * n   # per-sensor points contributed
         self._stat_sensor_hits = [0] * n  # per-sensor frames contributed
+
+        # 검출 실패를 파이프라인 단계별로 분류한다. "몇 % 놓쳤다"만 알면
+        # 어디를 고쳐야 할지 알 수 없어서, 탈락 지점을 직접 센다.
+        #   roi     ROI 통과 점이 10개 미만
+        #   sparse  DBSCAN 돌리기엔 점이 부족
+        #   noclust DBSCAN이 클러스터를 못 만듦
+        #   size    클러스터는 생겼지만 크기 필터에서 전부 탈락
+        #   gate    후보는 있었지만 연관 게이트가 거부
+        self._stat_fail = dict(roi=0, sparse=0, noclust=0, size=0, gate=0)
+        self._stat_rej_small = 0   # 크기필터: min_pts 미만이라 버린 클러스터
+        self._stat_rej_big = 0     # 크기필터: max_pts 초과라 버린 클러스터
 
         sensor_qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -306,10 +321,15 @@ class LidarDroneTracker(Node):
         self.declare_parameter('proc_noise_vel',  0.30)
         self.declare_parameter('meas_noise_pos',  0.15)
 
-        # Gating: reject a candidate farther than this from the KF prediction
-        # (metres). Must exceed the distance the drone can travel during a
-        # coast: 0.75 m/s × 1.5 s ≈ 1.1 m.
+        # Gating: reject a candidate farther than this from the KF prediction.
+        # This is the BASE (well-tracked) radius in metres; the effective gate
+        # widens with the filter's own uncertainty — see _select_drone_cluster.
         self.declare_parameter('max_assoc_dist', 3.0)
+        # How many sigma of position uncertainty to add to the base radius.
+        self.declare_parameter('gate_sigma_k', 3.0)
+        # Hard ceiling on the widened gate, so a long dropout can never open it
+        # far enough to latch onto unrelated clutter.
+        self.declare_parameter('max_assoc_dist_cap', 4.0)
 
         # Coasting: max frames to continue pure-predict when no detection
         self.declare_parameter('coast_max_frames', 5)
@@ -329,6 +349,10 @@ class LidarDroneTracker(Node):
         # 게이트 반경은 이보다 여유있게 잡아 항법이 부정확한 팀도
         # 표본을 놓치지 않게 한다 (좁게 잡으면 그런 팀은 표본이 아예
         # 안 잡혀서 채점 자체가 불가능해짐).
+        # 선택된 드론 클러스터의 원본 점들을 파일로 남긴다(비었으면 끔).
+        # 클러스터가 실제로 어떤 모양·분포로 잡히는지 사후에 확인하는 용도.
+        self.declare_parameter('cluster_dump_path', '')
+
         self.declare_parameter('waypoint_gate_radius', 4.5)       # m
         self.declare_parameter('waypoint_speed_threshold', 0.25)  # m/s
         # 최소 연속 프레임(4프레임 @ 10Hz ≈ 0.4초). 이보다 짧으면 노이즈로
@@ -372,9 +396,12 @@ class LidarDroneTracker(Node):
         self.home_xyz     = np.array(
             [gp('home_x'), gp('home_y'), gp('home_z')])
         self.max_assoc_dist = gp('max_assoc_dist')
+        self.gate_sigma_k = gp('gate_sigma_k')
+        self.max_assoc_dist_cap = gp('max_assoc_dist_cap')
         self.proc_noise_pos = gp('proc_noise_pos')
         self.proc_noise_vel = gp('proc_noise_vel')
         self.meas_noise_pos = gp('meas_noise_pos')
+        self.cluster_dump_path = gp('cluster_dump_path')
         self.waypoint_gate_radius = gp('waypoint_gate_radius')
         self.waypoint_speed_threshold = gp('waypoint_speed_threshold')
         self.waypoint_min_frames = gp('waypoint_min_frames')
@@ -487,12 +514,31 @@ class LidarDroneTracker(Node):
                 f'선택 클러스터 평균 {avg_pts:.1f}점  '
                 f'후보 {avg_cand:.1f}개  '
                 f'융합[{" + ".join(sensors)}]')
+
+            # 놓친 프레임이 있으면 어느 단계에서 빠졌는지 함께 보고한다.
+            # 이게 없으면 "몇 % 놓쳤다"만 알 뿐 어디를 고쳐야 할지 모른다.
+            miss = f - det
+            if miss > 0:
+                LBL = {'roi': 'ROI통과<10점', 'sparse': '점부족',
+                       'noclust': '클러스터0', 'size': '크기필터', 'gate': '게이트'}
+                parts = [f'{LBL[k]} {v}' for k, v in self._stat_fail.items() if v]
+                rej = []
+                if self._stat_rej_small:
+                    rej.append(f'작음(<{self.min_pts}점) {self._stat_rej_small}')
+                if self._stat_rej_big:
+                    rej.append(f'큼(>{self.max_pts}점) {self._stat_rej_big}')
+                self.get_logger().warn(
+                    f'  └ 미검출 {miss}프레임 원인: '
+                    + (', '.join(parts) if parts else '분류안됨')
+                    + (f'   [버려진 클러스터: {", ".join(rej)}]' if rej else ''))
         self._stat_t0 = now
         self._stat_frames = self._stat_detect = 0
         self._stat_cluster_pts = self._stat_cand = self._stat_merged_pts = 0
         n = len(self._sensors)
         self._stat_sensor_pts = [0] * n
         self._stat_sensor_hits = [0] * n
+        self._stat_fail = dict.fromkeys(self._stat_fail, 0)
+        self._stat_rej_small = self._stat_rej_big = 0
 
     def _process_cloud(self, pts_w: np.ndarray, header: Header):
         """Run the full pipeline on the fused world-frame cloud, step KF."""
@@ -507,6 +553,7 @@ class LidarDroneTracker(Node):
         )
         pts_w = pts_w[mask]
         if len(pts_w) < 10:
+            self._stat_fail['roi'] += 1
             self._coast(header)
             return
 
@@ -536,6 +583,7 @@ class LidarDroneTracker(Node):
 
         # DBSCAN clustering
         if len(pcd.points) < self.min_pts:
+            self._stat_fail['sparse'] += 1
             self._coast(header)
             return
 
@@ -547,16 +595,26 @@ class LidarDroneTracker(Node):
             )
         )
 
-        # Select the drone cluster
+        # KF predict FIRST, then associate against that prediction, then
+        # update (textbook predict → associate → update). Selecting before
+        # predicting would gate candidates against the PREVIOUS frame's
+        # posterior, i.e. a prior one frame stale — at 1.5 m/s that is 0.15 m
+        # of the association budget given away for nothing.
+        self._kf.predict(self._dt)
+
+        # Select the drone cluster (gated against the fresh prediction)
         centroid = self._select_drone_cluster(pts_f, labels, header)
         self._stat_cand += self._last_n_cand
-
-        # KF predict (fixed dt from the processing timer) → update
-        self._kf.predict(self._dt)
 
         if centroid is not None:
             self._stat_detect += 1
             self._stat_cluster_pts += self._last_sel_n
+            if self._dump is not None and self._last_sel_pts is not None:
+                # 프레임마다 (시각, 점들, 센트로이드)를 모아 close()에서 한 번에 저장
+                self._dump.append((
+                    header.stamp.sec + header.stamp.nanosec * 1e-9,
+                    self._last_sel_pts.astype(np.float32).copy(),
+                    centroid.astype(np.float32).copy()))
             if not self._kf.initialized:
                 self._kf.init(centroid)
             else:
@@ -594,6 +652,7 @@ class LidarDroneTracker(Node):
         self._last_sel_n = 0
         unique = [l for l in np.unique(labels) if l >= 0]
         if not unique:
+            self._stat_fail['noclust'] += 1
             return None
 
         candidates = []
@@ -603,7 +662,11 @@ class LidarDroneTracker(Node):
             mask = labels == label
             cluster = pts[mask]
             n = len(cluster)
-            if n < self.min_pts or n > self.max_pts:
+            if n < self.min_pts:
+                self._stat_rej_small += 1
+                continue
+            if n > self.max_pts:
+                self._stat_rej_big += 1
                 continue
 
             # median, not mean: a stray outlier point in the cluster pulls
@@ -637,17 +700,42 @@ class LidarDroneTracker(Node):
 
         self._last_n_cand = len(candidates)
         if not candidates:
+            self._stat_fail['size'] += 1
             return None
 
         if self._kf.initialized:
-            # Prefer the cluster nearest to the current KF estimate (which is
-            # seeded at home, so this locks onto the pad drone from the start
-            # and rejects a distant ground obstacle). Still valid while coasting
-            # — the predicted position is a good prior.
+            # Prefer the cluster nearest to the KF's PREDICTED position for
+            # this frame (predict() already ran in _process_cloud), so the
+            # prior accounts for how far the drone moved since last frame.
+            # Seeded near the hover band at startup so the first frames have
+            # a prior instead of falling back to cold-start. Still valid
+            # while coasting — pure prediction remains a usable prior.
             kf_pos = self._kf.position
             candidates.sort(key=lambda c: float(np.linalg.norm(c[1] - kf_pos)))
-            # Gate: if even the nearest candidate is too far, it isn't the drone.
-            if float(np.linalg.norm(candidates[0][1] - kf_pos)) > self.max_assoc_dist:
+            # Gate: reject the nearest candidate if it is implausibly far from
+            # the prediction.
+            #
+            # The threshold is NOT fixed. A constant gate creates a vicious
+            # cycle: once the prediction drifts past it (e.g. the constant-
+            # velocity model overshoots while the drone decelerates), the real
+            # drone is rejected, which starves the filter of corrections, which
+            # makes it drift further — the track never recovers until the
+            # whole filter is reset seconds later. Measured on 5 flights:
+            # dropouts began at a median 1.13m error against a 1.5m gate, each
+            # costing ~3.8s of silence.
+            #
+            # Instead scale it by the filter's own position uncertainty, which
+            # already grows on every predict-without-update. Tight while
+            # tracking well (so clutter is still rejected), wide right after a
+            # miss (so re-acquisition is possible). Capped so it can never open
+            # far enough to latch onto arbitrary clutter. This assumes nothing
+            # about how the drone is flown, so it holds for any team's flight
+            # style — unlike tuning the motion model for our own test mission.
+            sigma = float(np.sqrt(np.trace(self._kf.cov_pos[:2, :2]) / 2.0))
+            gate = min(self.max_assoc_dist + self.gate_sigma_k * sigma,
+                       self.max_assoc_dist_cap)
+            if float(np.linalg.norm(candidates[0][1] - kf_pos)) > gate:
+                self._stat_fail['gate'] += 1
                 return None
         else:
             # Truly cold start (home-seed disabled): the drone is the LARGEST
@@ -655,6 +743,8 @@ class LidarDroneTracker(Node):
             candidates.sort(key=lambda c: c[2], reverse=True)
 
         self._last_sel_n = candidates[0][2]
+        if self._dump is not None:
+            self._last_sel_pts = pts[labels == candidates[0][0]]
         return candidates[0][1]
 
     # ------------------------------------------------------------------
@@ -807,6 +897,27 @@ class LidarDroneTracker(Node):
         except Exception:
             pass
         self.get_logger().info(f'경로점 추정 결과 저장: {self._wp_csv_path}')
+        self._save_cluster_dump()
+
+    def _save_cluster_dump(self):
+        """클러스터 점들을 npz 하나로 저장.
+
+        프레임마다 점 개수가 달라 2D 배열로 못 쌓는다. 전부 이어붙인 뒤
+        프레임 경계를 offsets로 따로 기록하는 방식(CSR과 같은 구조)을 쓴다."""
+        if not self._dump:
+            return
+        times = np.array([d[0] for d in self._dump], dtype=np.float64)
+        counts = np.array([len(d[1]) for d in self._dump], dtype=np.int32)
+        pts = np.concatenate([d[1] for d in self._dump], axis=0)
+        cents = np.stack([d[2] for d in self._dump], axis=0)
+        offsets = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
+        path = os.path.expanduser(self.cluster_dump_path)
+        os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+        np.savez_compressed(path, times=times, points=pts, offsets=offsets,
+                            centroids=cents)
+        self.get_logger().info(
+            f'클러스터 덤프 저장: {path} '
+            f'({len(times)}프레임, 점 {len(pts)}개)')
 
     # ------------------------------------------------------------------
     # PointCloud2 utilities
