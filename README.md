@@ -12,16 +12,16 @@ PX4 SITL + Gazebo Harmonic + ROS2 Humble 환경에서 동작한다.
 
 ## 1. 개요
 
-- **gpu_lidar 2대**를 임무구역(30×20m) 밖(금지구역 33×23m 밖)에 배치. 두 구성 지원:
-  - **OS1-128** (±21.2° 수직FOV, 높이 2.0m, ns=남북 배치) ← 현재 기본
-  - **OS0-SR 64ch** (±45.4° 수직FOV, 높이 1.5m, diag=대각 배치)
+- **Ouster OS1-128 등가 gpu_lidar 2대**를 임무구역(30×20m) 밖(금지구역 33×23m 밖)
+  남북(ns)으로 배치. 수직FOV ±21.2°, 높이 2.0m — 호버 고도(2m)와 같게 두어 어느
+  거리에서나 목표를 0° 각도로 본다.
 - 각 LiDAR 포인트클라우드를 월드좌표로 변환·**융합** → ROI z-band 필터 → DBSCAN 클러스터링
   → 드론 클러스터 선택 → **6상태 KF**(등속도 모델, 표준 선형 칼만필터) 추적
 - 출력: `/drone/estimated_pose` (PoseWithCovarianceStamped, 월드 ENU)
 - 비행 후 **경로점(마커) 위 호버 구간을 자동 검출**해 마커별 위치를 재추정 → 채점 근거 산출
 - 실제 비행 궤적(PX4 ground-truth)과 비교·시각화하는 분석 도구 포함
 
-### 현재 성능 (OS1-128 / ns 배치 / 정상 비행 4회 · 경로점 28개)
+### 현재 성능 (정상 비행 4회 · 경로점 28개)
 
 | 항목 | 값 |
 |---|---|
@@ -58,10 +58,8 @@ ros2_ws/src/
       plot_flight.py                   # 계획 vs 실제 vs 추정 (평면+고도+3D 요약)
       plot_flight_3d.py                # 전체 경로 3D 전용 뷰
       compare_fusion.py                # [오프라인] 융합 방식 비교 (밀도가중/동일/역분산)
-    params/
-      lidar_localization.yaml          # OS0-SR / diag(대각) 배치용
-      lidar_localization_os1.yaml      # OS1-128 / ns(남북) 배치용  ← 현재 기본
-    launch/lidar_localization.launch.py     # params_file:= 로 둘 중 선택
+    params/lidar_localization.yaml     # 센서 pose·필터·KF 전체 튜닝값
+    launch/lidar_localization.launch.py
   drone_mission/                       # 비행 시나리오 (측위계의 시험용 표적)
     drone_mission/
       competition_mission.py           # PX4 offboard 궤적 재생
@@ -71,18 +69,15 @@ ros2_ws/src/
 
 gazebo/
   worlds/
-    generate_competition_map.py        # OS0-SR / diag 맵 생성기
-    generate_competition_map_os1.py    # OS1-128 / ns 맵 생성기 (맵·마커 동일, LiDAR만 교체)
-    competition_map.sdf                # 생성된 world (OS0-SR)
-    competition_map_os1.sdf            # 생성된 world (OS1-128)  ← 현재 기본
-    competition_map*_coordinates.txt   # 격자/마커/LiDAR 좌표 (정답지)
+    generate_competition_map.py        # 맵 생성기 (격자+마커+LiDAR 2대)
+    competition_map.sdf                # 생성된 world
+    competition_map_coordinates.txt    # 격자/마커/LiDAR 좌표 (정답지)
   models/
     generate_aruco_markers.py
     generate_ground_texture.py         # 잔디+흙 바닥 텍스처 생성기 (고정 시드)
     arena_ground/                      # 생성된 바닥 모델 (grass.png + SDF)
-    ground_lidar_sensor/               # OS0-SR 64ch 센서 모델
-    ground_lidar_sensor_os1_128/       # OS1-128ch 센서 모델
-    aruco_marker_id*/                  # 마커 모델 4개 (두 world 공유)
+    ground_lidar_sensor/               # OS1-128 등가 gpu_lidar 센서 모델
+    aruco_marker_id*/                  # 마커 모델 4개
 
 docs/
   DESIGN.md                            # 설계서 (센서배치 근거·알고리즘·평가기준)
@@ -207,7 +202,7 @@ Application Settings → Comm Links에서 자동연결(UDP)을 끄고 `127.0.0.1
 ```bash
 # 터미널 1 — PX4 SITL + Gazebo
 cd ~/drone_project/PX4-Autopilot
-PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=competition_map_os1 make px4_sitl gz_x500
+PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=competition_map make px4_sitl gz_x500
 
 # 터미널 2 — Micro-XRCE-DDS Agent
 MicroXRCEAgent udp4 -p 8888
@@ -216,8 +211,7 @@ MicroXRCEAgent udp4 -p 8888
 ~/Applications/QGroundControl.AppImage
 
 # 터미널 4 — 측위 시스템 (브릿지 + 추적 노드)
-ros2 launch drone_localization lidar_localization.launch.py \
-    params_file:=lidar_localization_os1.yaml
+ros2 launch drone_localization lidar_localization.launch.py
 
 # 터미널 5 — 비행 기록 (비행 전에 켜 둘 것)
 ros2 run drone_localization flight_recorder
@@ -226,9 +220,6 @@ ros2 run drone_localization flight_recorder
 ros2 run drone_mission competition_mission
 ```
 
-> world와 params는 **반드시 짝을 맞춰야** 한다 (`competition_map_os1` ↔
-> `lidar_localization_os1.yaml`). 센서 위치·높이가 달라 섞으면 측위가 통째로 어긋난다.
->
 > `PX4_GZ_NO_FOLLOW=1`을 빼면 드론 스폰 시 카메라가 드론에 고정돼 시점 조작이 안 된다.
 
 `flight_recorder`는 **착륙을 자동 감지**해서 그 비행을 `runNNN/`으로 보관하고 정확도
@@ -365,11 +356,13 @@ top-level 워크스페이스에는 센서 위치 반경 0.8m를 무시하는 대
 값이다. OS1-128은 ~0.33°로 4배 이상 조밀해 클러스터 크기·밀도가 다르다. 실비행 로그를 보고
 조정해야 한다.
 
-### 6.6 배치·센서 조합별 비교 미완료
+### 6.6 배치 비교 미완료
 
 반복 검증(4회)은 했지만, 설계서(`docs/DESIGN.md`)가 비교한 4가지 배치(ns/cross/edge/diag)
-중 ns와 diag만 실행해봤다. 배치를 실행 인자로 전환하는 기능도 없어 월드 파일을 따로 만들어
-쓴다. 비/안개 등 강건성 시험도 하지 않았다.
+중 ns와 diag만 실행해봤다. 현재 저장소는 **OS1-128 / ns 단일 구성**이며, OS0-SR / diag
+구성은 `~/drone_project/os0sr_archive/`로 옮겨 이 PC에만 남겼다(저장소에서는 제거).
+다른 배치를 시험하려면 `generate_competition_map.py`의 `LIDARS`와 yaml의 `lidarN_*`를
+함께 고쳐 재생성해야 한다. 비/안개 등 강건성 시험도 하지 않았다.
 
 ### 6.7 (해결됨) ROI 최소 점수 문턱값이 검출을 막고 있었음
 

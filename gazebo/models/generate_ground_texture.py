@@ -21,7 +21,7 @@ PC에는 없을 수 있다. 그래서 마커(generate_aruco_markers.py)와 같�
 
 == 사용법 ==
     python3 generate_ground_texture.py
-    # 또는 generate_competition_map_os1.py 가 import해서 호출
+    # 또는 generate_competition_map.py 가 import해서 호출
 """
 
 import os

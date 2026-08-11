@@ -78,12 +78,12 @@
   (25.7143, 12.0)
   (25.7143, 16.0)
 
-=== 실제 배치된 ArUco 마커 4개 (정답) ===
+=== 실제 배치된 ArUco 마커 4개 (정답, OS0-SR 버전과 동일) ===
   id=1  (x=4.2857, y=4.0)  model=aruco_marker_id1_at_x4_y4
   id=2  (x=4.2857, y=16.0)  model=aruco_marker_id2_at_x4_y16
   id=3  (x=25.7143, y=4.0)  model=aruco_marker_id3_at_x26_y4
   id=4  (x=12.8571, y=12.0)  model=aruco_marker_id4_at_x13_y12
 
-=== 지상 고정 LiDAR 2대 (측위 시스템, 금지구역 33x23 밖) ===
-  ground_lidar_1  world=(-1.5, -1.5, 1.5)  yaw=0.6094 rad  topic=/lidar1/points
-  ground_lidar_2  world=(31.5, 21.5, 1.5)  yaw=-2.5322 rad  topic=/lidar2/points
+=== 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용) ===
+  ground_lidar_1  world=(15.0, -1.5, 2.0)  yaw=1.5708 rad  topic=/lidar1/points
+  ground_lidar_2  world=(15.0, 21.5, 2.0)  yaw=-1.5708 rad  topic=/lidar2/points

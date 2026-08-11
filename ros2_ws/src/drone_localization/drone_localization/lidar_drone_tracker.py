@@ -256,23 +256,24 @@ class LidarDroneTracker(Node):
     # Parameter management
     # ------------------------------------------------------------------
     def _declare_parameters(self):
-        # --- LiDAR 1 pose in Gazebo world frame (ENU) ---
-        # Default: east side, x=35 (outside the 31.5m exclusion boundary),
-        # facing west (yaw=π) toward field centre (15,10).
+        # LiDAR poses — OS1-128, ns(남북) layout. 기본값을 실제 배치와 같게
+        # 두어, params_file 없이 노드만 띄워도 좌표가 맞도록 한다. 값 자체는
+        # gazebo/worlds/generate_competition_map.py 의 LIDARS와 동일해야 한다.
+        #
+        # --- LiDAR 1: 남쪽, 필드 X중앙, 북향(필드 중심) ---
         self.declare_parameter('lidar1_topic', '/lidar1/points')
-        self.declare_parameter('lidar1_x',     35.0)
-        self.declare_parameter('lidar1_y',     10.0)
-        self.declare_parameter('lidar1_z',      2.5)
+        self.declare_parameter('lidar1_x',     15.0)
+        self.declare_parameter('lidar1_y',     -1.5)
+        self.declare_parameter('lidar1_z',      2.0)
         self.declare_parameter('lidar1_roll',   0.0)
         self.declare_parameter('lidar1_pitch',  0.0)
-        self.declare_parameter('lidar1_yaw',    math.pi)
+        self.declare_parameter('lidar1_yaw',    math.pi / 2)
 
-        # --- LiDAR 2 pose (perpendicular view for triangulation) ---
-        # Default: north side, y=25 (outside 21.5m boundary), facing south.
+        # --- LiDAR 2: 북쪽, 필드 X중앙, 남향(필드 중심) ---
         self.declare_parameter('lidar2_topic', '/lidar2/points')
         self.declare_parameter('lidar2_x',     15.0)
-        self.declare_parameter('lidar2_y',     25.0)
-        self.declare_parameter('lidar2_z',      2.5)
+        self.declare_parameter('lidar2_y',     21.5)
+        self.declare_parameter('lidar2_z',      2.0)
         self.declare_parameter('lidar2_roll',   0.0)
         self.declare_parameter('lidar2_pitch',  0.0)
         self.declare_parameter('lidar2_yaw',   -math.pi / 2)
@@ -302,8 +303,8 @@ class LidarDroneTracker(Node):
         # DBSCAN clustering (PCL EuclideanClusterExtraction equivalent)
         # eps=25cm: connects points within the same drone body (50cm–1m)
         # min_pts=3: side-view LiDAR gives few hits on a small drone at distance
-        self.declare_parameter('cluster_tolerance',  0.25)
-        self.declare_parameter('cluster_min_points',  3)
+        self.declare_parameter('cluster_tolerance',  0.40)
+        self.declare_parameter('cluster_min_points',  2)
         self.declare_parameter('cluster_max_points',  400)
 
         # Home-seed: seeds the KF near where the drone should first appear so
@@ -325,7 +326,7 @@ class LidarDroneTracker(Node):
         # Gating: reject a candidate farther than this from the KF prediction.
         # This is the BASE (well-tracked) radius in metres; the effective gate
         # widens with the filter's own uncertainty — see _select_drone_cluster.
-        self.declare_parameter('max_assoc_dist', 3.0)
+        self.declare_parameter('max_assoc_dist', 1.5)
         # How many sigma of position uncertainty to add to the base radius.
         self.declare_parameter('gate_sigma_k', 3.0)
         # Hard ceiling on the widened gate, so a long dropout can never open it
@@ -333,7 +334,7 @@ class LidarDroneTracker(Node):
         self.declare_parameter('max_assoc_dist_cap', 4.0)
 
         # Coasting: max frames to continue pure-predict when no detection
-        self.declare_parameter('coast_max_frames', 5)
+        self.declare_parameter('coast_max_frames', 15)
         # Prolonged loss: after this many coast frames, drop the KF entirely
         # (cold-start) so the next detection is free to re-lock on the
         # largest cluster instead of being gated against a stale prediction.

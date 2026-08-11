@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-제24회 한국로봇항공기경연대회 중급부문 "실내 조난자 탐색 임무" 맵 생성기.
+제24회 한국로봇항공기경연대회 중급부문 "실내 조난자 탐색 임무" 맵 생성기 — OS1-128 버전.
+
+generate_competition_map.py(OS0-SR, 원본, 그대로 둠)의 맵/마커 배치는 동일하게
+유지하고, 지상 고정 LiDAR만 Ouster OS1(Standard Range) 128채널 + 남북(ns) 배치로
+교체한 버전. OS1은 수직시야각이 OS0-SR의 절반(±21.2° vs ±45.4°)이라 배치 높이를
+다시 계산함 (호버링(z≈2m) 구간만 보도록 설계 — 이착륙 구간은 이 배치로는 커버
+안 함). XY는 docs/DESIGN.md §1에서 이론상 최고 검출밀도로 나온 ns 배치를 채택.
 
 생성물:
   - worlds/competition_map.sdf              실행용 Gazebo world
   - worlds/competition_map_coordinates.txt  격자 교차점 전체 좌표 + 마커 4개 좌표
-  - models/aruco_marker_id{N}_at_x{X}_y{Y}/ 마커 모델 4개 (generate_aruco_markers.py 호출)
+  - models/aruco_marker_id{N}_at_x{X}_y{Y}/     마커 모델 4개 (OS0-SR 버전과 공유, 동일 좌표라 재사용됨)
 
 실행:
   python3 -m pip install --target /tmp/arucopkgs "numpy<2" "opencv-contrib-python-headless"
@@ -19,77 +25,86 @@ WORLDS_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(os.path.dirname(WORLDS_DIR), "models")
 sys.path.insert(0, MODELS_DIR)
 from generate_aruco_markers import generate_marker  # noqa: E402
+from generate_ground_texture import generate_ground_model  # noqa: E402
 
 # ---------------------------------------------------------------------------
-# 맵 사양 (대회 규정집 기준)
+# 맵 사양 (대회 규정집 기준) — generate_competition_map.py와 완전히 동일
 # ---------------------------------------------------------------------------
-AREA_X = 30.0          # 임무구역 가로 (m)
-AREA_Y = 20.0          # 임무구역 세로 (m)
-LINE_WIDTH = 0.10       # 구획선 폭 10cm
-LINE_THICKNESS = 0.001  # 구획선 두께(z 방향, 바닥에서 살짝 띄움)
-MARKER_Z = 0.002        # 마커 높이 (바닥 0 < 구획선 0.001 < 마커 0.002, z-fighting 방지)
+AREA_X = 30.0
+AREA_Y = 20.0
+LINE_WIDTH = 0.10       # 구획선 폭 10cm (규정)
 
-# 30m / 4m = 7.5, 20m / 4m = 5 → 정확히 4m로는 X축이 안 나눠떨어진다.
-# 후보: 7칸(4.286m, |오차| 0.286m) vs 8칸(3.75m, |오차| 0.25m).
-# 8칸이 4m에 더 가깝지만 7칸과 거의 동률이고, 7칸 쪽이 교차점 수가 적당해
-# "TBR 4개 경로점"을 배치하기에 더 자연스러워 7칸(가로) x 5칸(세로)을 채택.
+# 바닥 적층 순서 (z-fighting 방지). 아래에서 위로:
+#   ground_plane(0) < 잔디(GRASS_TOP_Z) < 구획선(LINE_Z) < 마커(MARKER_Z)
+# 각 층은 자기 두께만큼 공간을 차지하므로 간격을 두께보다 크게 잡는다.
+GRASS_THICKNESS = 0.002
+GRASS_TOP_Z = 0.001                     # 잔디 상단면 높이
+GRASS_MARGIN = 6.0                      # 경기장 밖으로 잔디를 더 깔 여유 (m)
+LINE_THICKNESS = 0.002
+LINE_Z = GRASS_TOP_Z + LINE_THICKNESS   # 구획선 중심 높이 → 상단 0.005
+MARKER_Z = LINE_Z + 0.002               # 마커는 구획선 위
+
 N_CELLS_X = 7
 N_CELLS_Y = 5
-CELL_X = AREA_X / N_CELLS_X   # 4.2857m
-CELL_Y = AREA_Y / N_CELLS_Y   # 4.0m (정확히 4m)
+CELL_X = AREA_X / N_CELLS_X
+CELL_Y = AREA_Y / N_CELLS_Y
 
-x_positions = [round(i * CELL_X, 4) for i in range(N_CELLS_X + 1)]   # 8개
-y_positions = [round(j * CELL_Y, 4) for j in range(N_CELLS_Y + 1)]   # 6개
+x_positions = [round(i * CELL_X, 4) for i in range(N_CELLS_X + 1)]
+y_positions = [round(j * CELL_Y, 4) for j in range(N_CELLS_Y + 1)]
 all_intersections = [(x, y) for x in x_positions for y in y_positions]
 
-# "임무구역 경계에서 최소 1격자 셀 이상 안쪽" 제약:
-# 바깥쪽 테두리 인덱스(0번째, 마지막번째)를 제외한 내부 교차점만 후보로 삼는다.
-interior_x = x_positions[1:-1]   # 6개
-interior_y = y_positions[1:-1]   # 4개
-interior_intersections = [(x, y) for x in interior_x for y in interior_y]  # 24개
+interior_x = x_positions[1:-1]
+interior_y = y_positions[1:-1]
+interior_intersections = [(x, y) for x in interior_x for y in interior_y]
 
-# 처음엔 random.sample(interior_intersections, 4)로 랜덤 배치했으나, 2->1->0->3 식
-# 0-인덱스 방문순서가 헷갈려서 마커 번호를 방문순서 그대로 1->2->3->4로 바꾸고,
-# 그 과정에서 id4(옛 id3)가 id2->id3(옛 id1->id0) 구간 코너와 겹쳐 재배치했다.
-# generate_groundtruth_trajectory.py의 MARKERS와 항상 동일하게 유지할 것.
 marker_coords = [
     (4.2857, 4.0),    # id1
     (4.2857, 16.0),   # id2
     (25.7143, 4.0),   # id3
-    (12.8571, 12.0),  # id4 (재배치됨)
+    (12.8571, 12.0),  # id4
 ]
 markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 
 # ---------------------------------------------------------------------------
-# 지상 고정 LiDAR 2대 (측위 시스템용, outside-in)
+# 지상 고정 LiDAR 2대 — OS1-128 (Standard Range), 남북(ns) 배치
 # ---------------------------------------------------------------------------
-# 임무구역은 world 좌표 X:[0,30] Y:[0,20], 중심 (15,10).
-# 안전여유 33x23 금지구역 = |x-15|<16.5 AND |y-10|<11.5
-#   → 금지: x in (-1.5, 31.5) AND y in (-1.5, 21.5). 이 밖에 설치해야 함.
-# 두 대를 "직교 방향"(동쪽+북쪽)으로 배치해 삼각측량 정확도를 높이고
-# 가림(occlusion)에 강건하게 한다. gpu_lidar 센서의 3D 클라우드는
-# <topic>/points 로 나가므로 topic을 /lidar1, /lidar2 로 준다 (실제 하드웨어 +
-# lidar_extrinsic_calib 패키지의 기본 토픽명과 통일).
-# generate_groundtruth... 가 아니라 drone_localization 의 YAML(lidar1_*/lidar2_*)
-# 과 이 좌표를 항상 동일하게 유지할 것.
-# 배치 근거(커버리지 계산): 필드 대각선 36m > 사거리 35m 라 한 대로는 반대
-# 코너를 못 본다. 두 대를 대각 코너(금지구역 경계)에 두면 union 100% 커버,
-# 그 중 95.5%는 두 대가 동시에 봐서 삼각측량 품질이 최고.
-# 높이 1.5m: LiDAR~landpad 수평거리 2.12m 이므로 바닥(z=0)을 ±45°로 보려면
-# h<=2.12 여야 한다. 1.5m면 패드에 앉은 드론(z=0)도 하향각 35°로 여유있게 보이고
-# (여유 ~20°) 커버리지 100% 유지 → "바닥 시작점부터 위치추정" 조건 만족.
-# 드론(2m)을 살짝 아래서 위로 봐서 항상 하늘 배경(분리 깔끔). 고도변화 민감도는
-# 거리에만 의존해 2.0m와 동일. 코앞 위쪽 천장은 3.5m(미션 2m엔 충분).
-# yaw는 360° 스캔이라 커버리지에 무영향(SDF↔YAML만 일치하면 됨) — 시각적으로
-# 필드 중심(15,10)을 향하게만 둔다.
+# XY: docs/DESIGN.md §1의 ns 배치 좌표 그대로 — (15,-1.5) 남 + (15,21.5) 북,
+# 필드 X중앙(15)에 맞춰 마주보게 배치. 이 배치가 검출밀도 이론상 최고(최소점
+# 9.0, diag는 5.1)였던 근거는 "최대거리가 짧은 축(Y,20m) 기준 26.2m로 diag의
+# 38.1m보다 훨씬 짧다"는 것 — 거리가 짧을수록 점 밀도가 높아짐(점수∝1/거리²).
+#
+# 설계 전제: 이 배치는 "호버링 구간(z≈2m)만" 본다. 전체 루트(이착륙 포함) 추적은
+# 포기 — OS1의 수직시야각(±21.2°)이 OS0-SR(±45.4°)의 절반이라 지면부터 호버까지
+# 한 배치로 커버하려면 기존 설계 근거가 그대로 재사용 안 됨(docs/DESIGN.md 참고).
+#
+# 높이 h=2.0m 선택 근거: 목표고도(2.0m)와 센서높이를 맞춰 어느 배치·거리에서든
+# 각도 = atan2(2.0-h, d) = 0°가 되게 하는 원리는 diag와 동일. 다만 ns는 가장
+# 가까운 지점이 필드 경계 바로 앞(남쪽 센서 (15,-1.5)에서 (15,0)까지 수평거리
+# 1.5m — diag의 코너 2.12m보다 더 가까움)이라, 그 지점에서의 고도 변동 허용치가
+# ±21.2°×tan → 1.5m×tan(21.2°) ≈ **±0.58m** (diag는 ±0.82m였음). 대회 기준
+# 수직오차 허용치(0.5m)보다는 여전히 넉넉하지만, diag보다 여유가 줄어든 트레이드
+# 오프임 — ns가 커버리지/밀도는 이론상 낫지만 근접점 고도마진은 더 빡빡함.
+# pitch=0(수평)은 여전히 최적: 목표고도와 센서높이가 같아서 틀 필요 없음.
+#
+# topic은 OS0-SR 버전과 동일하게 /lidar1, /lidar2 (한 번에 하나의 world만 로드되므로
+# 토픽명이 겹쳐도 문제없음 — 어느 쪽을 PX4_GZ_WORLD로 띄우느냐로 결정됨).
 LIDARS = [
     # (name, topic, x, y, z, roll, pitch, yaw)
-    ("ground_lidar_1", "/lidar1", -1.5, -1.5, 1.5, 0.0, 0.0, 0.6094),   # landpad 코너(남서), 필드향
-    ("ground_lidar_2", "/lidar2", 31.5, 21.5, 1.5, 0.0, 0.0, -2.5322),  # 대각(북동), 필드향
+    ("ground_lidar_1", "/lidar1", 15.0, -1.5, 2.0, 0.0, 0.0,  1.5708),  # 남쪽, 필드중앙X, 북향
+    ("ground_lidar_2", "/lidar2", 15.0, 21.5, 2.0, 0.0, 0.0, -1.5708),  # 북쪽, 필드중앙X, 남향
 ]
 
+# GUI에 LiDAR 레이(파란 부채꼴)를 그릴지 여부.
+# OS1-128은 1024 x 128 = 131,072 레이 x 2대 = 262,144개를 매 프레임 그려야 해서
+# (OS0-SR 64ch의 2배) 켜두면 드론 스폰 직후 뷰포트 조작이 사실상 불가능해진다.
+# 레이를 꺼도 포인트클라우드 발행에는 전혀 영향이 없다 — 측위 동작은 동일하고,
+# 점을 보고 싶으면 RViz2의 /lidar1,2/points 를 쓰면 된다.
+# 센서 방향을 눈으로 확인해야 할 때만 잠깐 True로 바꿔 재생성할 것.
+LIDAR_VISUALIZE = True
+
 # ---------------------------------------------------------------------------
-# 1) ArUco 마커 모델 생성 (PNG + model.config/model.sdf)
+# 1) ArUco 마커 모델 생성 (PNG + model.config/model.sdf) — OS0-SR 버전과 좌표 동일,
+#    같은 디렉토리를 재생성(덮어쓰기)하므로 두 world가 같은 마커 모델을 공유함.
 # ---------------------------------------------------------------------------
 marker_model_names = []
 for marker_id, x, y in markers:
@@ -97,48 +112,53 @@ for marker_id, x, y in markers:
     marker_model_names.append(name)
     print(f"마커 생성: {name}  (x={x}, y={y})")
 
+# 잔디 바닥 모델 (텍스처 PNG 포함) 생성
+ground_model_name, _tex_px, _ground_span = generate_ground_model(
+    MODELS_DIR, area_x=AREA_X, area_y=AREA_Y, margin=GRASS_MARGIN)
+print(f"잔디 바닥 생성: {ground_model_name}  "
+      f"({_ground_span[0]}x{_ground_span[1]}m, 텍스처 {_tex_px[0]}x{_tex_px[1]}px)")
+
 
 # ---------------------------------------------------------------------------
 # 2) SDF 조각 생성 함수들
 # ---------------------------------------------------------------------------
 def grid_line_models() -> str:
+    """구획선: 폭 10cm 흰색. 잔디 위에서 확실히 보이도록 흰색을 쓰고,
+    emissive를 약간 넣어 그림자 진 쪽에서도 회색으로 죽지 않게 한다."""
+    line_material = '''
+          <material>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
+          </material>'''
     parts = []
     idx = 0
-    for x in x_positions:  # 세로선 (X 고정, Y 전체를 가로지름)
+    for x in x_positions:
         idx += 1
         parts.append(f'''
     <model name="gridline_v_{idx}">
       <static>true</static>
-      <pose>{x} {AREA_Y / 2} {LINE_THICKNESS} 0 0 0</pose>
+      <pose>{x} {AREA_Y / 2} {LINE_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box><size>{LINE_WIDTH} {AREA_Y} {LINE_THICKNESS}</size></box>
-          </geometry>
-          <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-          </material>
+          </geometry>{line_material}
         </visual>
       </link>
     </model>''')
-    for y in y_positions:  # 가로선 (Y 고정, X 전체를 가로지름)
+    for y in y_positions:
         idx += 1
         parts.append(f'''
     <model name="gridline_h_{idx}">
       <static>true</static>
-      <pose>{AREA_X / 2} {y} {LINE_THICKNESS} 0 0 0</pose>
+      <pose>{AREA_X / 2} {y} {LINE_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <box><size>{AREA_X} {LINE_WIDTH} {LINE_THICKNESS}</size></box>
-          </geometry>
-          <material>
-            <ambient>0.02 0.02 0.02 1</ambient>
-            <diffuse>0.02 0.02 0.02 1</diffuse>
-            <specular>0.05 0.05 0.05 1</specular>
-          </material>
+          </geometry>{line_material}
         </visual>
       </link>
     </model>''')
@@ -161,16 +181,16 @@ def marker_includes() -> str:
 def lidar_models() -> str:
     """지상 고정 gpu_lidar 2대를 world에 인라인으로 삽입.
 
-    각 모델: 지지대 기둥(바닥→센서) + 주황 하우징 + 흰 캡 + gpu_lidar 센서.
-    센서 스펙은 Ouster OS0-SR 64ch 등가 (수평 360°/1024, 수직 ±45.4°/64,
-    range 0.3~35m, 10Hz, gaussian noise 0.8cm).
+    각 모델: 지지대 기둥(바닥→센서) + 청색 하우징(OS0-SR의 주황과 구분) + 흰 캡
+    + gpu_lidar 센서. 센서 스펙은 Ouster OS1(Standard Range) 128ch 등가
+    (수평 360°/1024, 수직 ±21.2°/128, range 0.1~170m, 10Hz, gaussian noise 0.5cm).
     """
     parts = []
     for name, topic, x, y, z, roll, pitch, yaw in LIDARS:
-        pole_len = z                    # 바닥(0)부터 센서 높이(z)까지
-        pole_cz = -z / 2.0              # 모델 원점 기준 기둥 중심
+        pole_len = z
+        pole_cz = -z / 2.0
         parts.append(f'''
-    <!-- 지상 고정 LiDAR: {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
+    <!-- 지상 고정 LiDAR(OS1-128): {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
     <model name="{name}">
       <static>true</static>
       <pose>{x} {y} {z} {roll} {pitch} {yaw}</pose>
@@ -190,10 +210,10 @@ def lidar_models() -> str:
             <cylinder><radius>0.09</radius><length>0.16</length></cylinder>
           </geometry>
           <material>
-            <ambient>0.9 0.45 0.05 1</ambient>
-            <diffuse>1.0 0.5 0.05 1</diffuse>
+            <ambient>0.05 0.45 0.9 1</ambient>
+            <diffuse>0.05 0.5 1.0 1</diffuse>
             <specular>0.3 0.3 0.3 1</specular>
-            <emissive>0.3 0.15 0.0 1</emissive>
+            <emissive>0.0 0.15 0.3 1</emissive>
           </material>
         </visual>
         <visual name="cap">
@@ -211,7 +231,7 @@ def lidar_models() -> str:
           <update_rate>10</update_rate>
           <topic>{topic}</topic>
           <gz_frame_id>{name}_frame</gz_frame_id>
-          <visualize>true</visualize>
+          <visualize>{'true' if LIDAR_VISUALIZE else 'false'}</visualize>
           <lidar>
             <scan>
               <horizontal>
@@ -221,21 +241,21 @@ def lidar_models() -> str:
                 <max_angle>3.14159265358979</max_angle>
               </horizontal>
               <vertical>
-                <samples>64</samples>
+                <samples>128</samples>
                 <resolution>1</resolution>
-                <min_angle>-0.79234</min_angle>
-                <max_angle>0.79234</max_angle>
+                <min_angle>-0.37001</min_angle>
+                <max_angle>0.37001</max_angle>
               </vertical>
             </scan>
             <range>
-              <min>0.3</min>
-              <max>35.0</max>
+              <min>0.1</min>
+              <max>170.0</max>
               <resolution>0.001</resolution>
             </range>
             <noise>
               <type>gaussian</type>
               <mean>0.0</mean>
-              <stddev>0.008</stddev>
+              <stddev>0.005</stddev>
             </noise>
           </lidar>
         </sensor>
@@ -276,12 +296,23 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
 
     <scene>
       <grid>false</grid>
-      <ambient>0.4 0.4 0.4 1</ambient>
-      <background>0.7 0.7 0.7 1</background>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <!-- <sky>가 렌더링되면 background는 가려지지만, 스카이돔을 지원하지
+           않는 렌더러/헤드리스에서는 이 하늘색이 그대로 배경이 된다. -->
+      <background>0.53 0.72 0.92 1</background>
       <shadows>true</shadows>
+      <sky>
+        <clouds>
+          <speed>2.5</speed>
+          <direction>0.7</direction>
+          <humidity>0.55</humidity>
+          <mean_size>0.35</mean_size>
+        </clouds>
+      </sky>
     </scene>
 
-    <!-- 바닥: 임무구역과 대비되는 밝은 회색 바닥 -->
+    <!-- 바닥(먼 배경 + 충돌면): 잔디 텍스처 박스 바깥으로 이어지는 벌판.
+         텍스처 없이 잔디색 단색이라 지평선까지 자연스럽게 이어진다. -->
     <model name="ground_plane">
       <static>true</static>
       <link name="link">
@@ -306,9 +337,9 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
             </plane>
           </geometry>
           <material>
-            <ambient>0.85 0.85 0.83 1</ambient>
-            <diffuse>0.85 0.85 0.83 1</diffuse>
-            <specular>0.2 0.2 0.2 1</specular>
+            <ambient>0.24 0.34 0.16 1</ambient>
+            <diffuse>0.40 0.55 0.26 1</diffuse>
+            <specular>0.02 0.02 0.02 1</specular>
           </material>
         </visual>
         <pose>0 0 0 0 -0 0</pose>
@@ -326,18 +357,28 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
       <self_collide>false</self_collide>
     </model>
 
-    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드 -->
+    <!-- 잔디 바닥 (경기장 + 여유 {GRASS_MARGIN}m, 타일링 텍스처).
+         상단면이 정확히 z={GRASS_TOP_Z}가 되도록 두께 절반만큼 내려서 배치. -->
+    <include>
+      <uri>model://{ground_model_name}</uri>
+      <name>{ground_model_name}</name>
+      <pose>{AREA_X / 2} {AREA_Y / 2} {GRASS_TOP_Z - GRASS_THICKNESS / 2} 0 0 0</pose>
+    </include>
+
+    <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드.
+         바닥이 잔디(녹색)라 기존 녹색 패드는 묻혀서 안 보이므로 흰색 계열로. -->
     <model name="home_pad">
       <static>true</static>
-      <pose>0 0 0.0015 0 0 0</pose>
+      <pose>0 0 {MARKER_Z} 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
             <cylinder><radius>0.5</radius><length>0.001</length></cylinder>
           </geometry>
           <material>
-            <ambient>0.1 0.7 0.2 1</ambient>
-            <diffuse>0.1 0.7 0.2 1</diffuse>
+            <ambient>0.90 0.90 0.88 1</ambient>
+            <diffuse>0.98 0.98 0.96 1</diffuse>
+            <emissive>0.22 0.22 0.20 1</emissive>
           </material>
         </visual>
       </link>
@@ -349,7 +390,7 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
     <!-- 경로점 ArUco 마커 4개 (DICT_4X4_50, 0.5m x 0.5m), 경계에서 1셀 이상 안쪽 -->
 {marker_includes()}
 
-    <!-- 지상 고정 LiDAR 2대 (측위용, 33x23 금지구역 밖, 동쪽+북쪽 직교 배치) -->
+    <!-- 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용, 33x23 금지구역 밖) -->
 {lidar_models()}
 
     <light name="sunUTC" type="directional">
@@ -407,11 +448,11 @@ with open(out_txt, "w") as f:
         for y in interior_y:
             f.write(f"  ({x}, {y})\n")
 
-    f.write("\n=== 실제 배치된 ArUco 마커 4개 (정답) ===\n")
+    f.write("\n=== 실제 배치된 ArUco 마커 4개 (정답, OS0-SR 버전과 동일) ===\n")
     for name, (marker_id, x, y) in zip(marker_model_names, markers):
         f.write(f"  id={marker_id}  (x={x}, y={y})  model={name}\n")
 
-    f.write("\n=== 지상 고정 LiDAR 2대 (측위 시스템, 금지구역 33x23 밖) ===\n")
+    f.write("\n=== 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용) ===\n")
     for name, topic, x, y, z, roll, pitch, yaw in LIDARS:
         f.write(f"  {name}  world=({x}, {y}, {z})  yaw={yaw} rad  "
                 f"topic={topic}/points\n")

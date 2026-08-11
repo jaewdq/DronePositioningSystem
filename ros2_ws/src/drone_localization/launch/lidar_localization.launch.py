@@ -1,8 +1,8 @@
 """
 Launch file for the two-LiDAR drone localization system.
 
-The two ground LiDARs are now baked into the world (competition_map.sdf or
-competition_map_os1.sdf), so this launch does NOT spawn them. It only:
+The two ground LiDARs (OS1-128, ns layout) are baked into the world
+(competition_map.sdf), so this launch does NOT spawn them. It only:
   1. Bridges /lidar1/points and /lidar2/points  (Gazebo → ROS2 PointCloud2)
   2. Starts the lidar_drone_tracker node (fuses both clouds, KF tracking)
   3. Publishes a static identity transform (map -> world)
@@ -16,21 +16,15 @@ upstream in the tracker).
 
 Prerequisites (separate terminals, started first):
   Terminal 1: cd ~/drone_project/PX4-Autopilot
-              PX4_GZ_WORLD=competition_map make px4_sitl gz_x500
-              → loads the world with ground_lidar_1 (east) + ground_lidar_2 (north)
-              (OS1-128 instead: PX4_GZ_WORLD=competition_map_os1)
+              PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=competition_map make px4_sitl gz_x500
 
   Terminal 2: MicroXRCEAgent udp4 -p 8888
 
   Terminal (optional, to actually fly):
               ros2 run drone_mission competition_mission
 
-Usage (OS0-SR, default):
+Usage:
   ros2 launch drone_localization lidar_localization.launch.py
-
-Usage (OS1-128):
-  ros2 launch drone_localization lidar_localization.launch.py \\
-      params_file:=lidar_localization_os1.yaml
 
 Visualise (optional):
   ros2 run rviz2 rviz2 -f map
@@ -39,11 +33,10 @@ Visualise (optional):
      without needing a separate static_transform_publisher.)
 
 NOTE: If you change a LiDAR pose, edit it in BOTH
-  - Tools/simulation/gz/worlds/generate_competition_map*.py (LIDARS) + regenerate
-  - params/lidar_localization*.yaml (lidarN_*)
-so the physical sensor and the node's transform stay in sync. The OS0-SR and
-OS1-128 configs are separate world+yaml pairs — always match the world you
-launched with the matching params_file.
+  - gazebo/worlds/generate_competition_map.py (LIDARS) + regenerate + redeploy
+  - params/lidar_localization.yaml (lidarN_*)
+so the physical sensor and the node's transform stay in sync. They are not
+linked automatically; changing only one silently breaks localization.
 """
 
 from ament_index_python.packages import get_package_share_directory
@@ -58,9 +51,7 @@ def generate_launch_description():
 
     params_file_arg = DeclareLaunchArgument(
         'params_file', default_value='lidar_localization.yaml',
-        description='Params filename under params/. '
-                     'lidar_localization.yaml = OS0-SR (default), '
-                     'lidar_localization_os1.yaml = OS1-128.')
+        description='Params filename under params/ (OS1-128 / ns layout).')
     params_path = PathJoinSubstitution(
         [pkg_share, 'params', LaunchConfiguration('params_file')])
 

@@ -94,10 +94,10 @@ def _lidars():
         import yaml
         from ament_index_python.packages import get_package_share_directory
         p = os.path.join(get_package_share_directory('drone_localization'),
-                         'params', 'lidar_localization_os1.yaml')
+                         'params', 'lidar_localization.yaml')
     except Exception:
         p = os.path.join(os.path.dirname(_HERE), 'params',
-                         'lidar_localization_os1.yaml')
+                         'lidar_localization.yaml')
     try:
         import yaml
         d = yaml.safe_load(open(p))['lidar_drone_tracker']['ros__parameters']

@@ -18,7 +18,7 @@ Z bias(+0.24m)의 원인을 눈으로 확인하는 것이 주 용도다. 센트�
 사용법:
   # 1) 비행할 때 덤프를 켠다
   ros2 launch drone_localization lidar_localization.launch.py \
-      params_file:=lidar_localization_os1.yaml \
+      params_file:=lidar_localization.yaml \
       cluster_dump_path:=~/drone_project/flight_logs/clusters.npz
   # 2) 비행 후
   python3 plot_cluster_shape.py --dump ~/drone_project/flight_logs/clusters.npz

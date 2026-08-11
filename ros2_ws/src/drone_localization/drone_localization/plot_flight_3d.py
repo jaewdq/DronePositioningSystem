@@ -159,14 +159,14 @@ def _default_params_path():
     try:
         from ament_index_python.packages import get_package_share_directory
         share = get_package_share_directory('drone_localization')
-        cand = os.path.join(share, 'params', 'lidar_localization_os1.yaml')
+        cand = os.path.join(share, 'params', 'lidar_localization.yaml')
         if os.path.isfile(cand):
             return cand
     except Exception:
         pass
     return os.path.expanduser(
         '~/drone_project/DronePositioningSystem/ros2_ws/src/drone_localization/'
-        'params/lidar_localization_os1.yaml')
+        'params/lidar_localization.yaml')
 
 
 def _style_axes(ax):

@@ -2,7 +2,7 @@ lidar_drone_tracker:
   ros__parameters:
 
     # ---------------------------------------------------------------
-    # LiDAR physical poses in Gazebo world frame (ENU, Z-up)
+    # LiDAR physical poses in Gazebo world frame (ENU, Z-up) — OS1-128 variant
     #
     # Field center in world frame: x=15.0, y=10.0
     # Exclusion zone (33x23m): forbidden if |x-15|<16.5 AND |y-10|<11.5
@@ -11,43 +11,48 @@ lidar_drone_tracker:
     # IMPORTANT: these poses MUST match the LIDARS list in
     #   Tools/simulation/gz/worlds/generate_competition_map.py
     # (the world spawns the sensors; this node transforms their clouds
-    #  to world frame using exactly these poses).
+    #  to world frame using exactly these poses). Use with world
+    #  competition_map (PX4_GZ_WORLD=competition_map), NOT
+    #  the OS0-SR competition_map world — sensor heights differ.
     #
-    # Two LiDARs sit at OPPOSITE DIAGONAL CORNERS of the field (just outside
-    # the exclusion zone). Coverage calc: the field diagonal (36m) exceeds the
-    # 35m range, so one LiDAR alone can't see the far corner — but the two
-    # together cover 100% of the 30x20 area, with ~95% seen by BOTH (good
-    # triangulation).
-    # Height 1.5m: the LiDAR is 2.12m (horizontal) from the landpad, and to
-    # see a ground point (z=0) within the ±45° cone you need d>=h. h=1.5<2.12
-    # so the drone is trackable from the ground up (z=0 → 35° downward angle,
-    # ~20° margin). The drone (2m) is viewed slightly from below → always
-    # against an empty-sky background (clean segmentation). Altitude-change
-    # sensitivity is identical to h=2.0 (it depends on range, not LiDAR height).
+    # ns (남북) layout — docs/DESIGN.md §1's theoretically best-density layout
+    # (min detection score 9.0 vs diag's 5.1; max range 26.2m on the short
+    # Y-axis vs diag's 38.1m corner-to-corner).
+    #
+    # Height 2.0m: this layout ONLY tracks the hover band (z≈2.0m), not the
+    # full route (see roi_z_min/max below) — OS1's vertical FOV (±21.2°) is
+    # half the OS0-SR's (±45.4°), so a from-the-ground design does not carry
+    # over. Matching sensor height to the 2.0m hover target keeps the angle
+    # to it at 0° at any range, same principle as the diag layout — but ns's
+    # closest approach is 1.5m (straight out from (15,-1.5) to the field edge
+    # (15,0)), closer than diag's 2.12m corner, so the altitude margin there
+    # is smaller: 1.5m×tan(21.2°) ≈ ±0.58m (diag had ±0.82m). Still well
+    # above the 0.5m competition tolerance, just less headroom than diag.
+    # pitch=0 (level) is still optimal since sensor height == target height.
     #
     # topic = <sensor topic>/points  (gpu_lidar appends /points for the 3D cloud)
     #
-    # The Ouster OS0-SR is a 360° full-scan LiDAR, so yaw does NOT affect
+    # The Ouster OS1 is a 360° full-scan LiDAR, so yaw does NOT affect
     # coverage — it only has to match the world SDF value.
     # ---------------------------------------------------------------
 
-    # --- LiDAR 1: landpad corner (south-west), facing field center ---
+    # --- LiDAR 1: south, field-X-centred, facing north (field center) ---
     lidar1_topic: "/lidar1/points"
-    lidar1_x:     -1.5
+    lidar1_x:     15.0
     lidar1_y:     -1.5
-    lidar1_z:      1.5
+    lidar1_z:      2.0
     lidar1_roll:   0.0
     lidar1_pitch:  0.0
-    lidar1_yaw:    0.6094     # faces field center (15,10) from SW corner
+    lidar1_yaw:    1.5708     # faces field center (15,10) from south
 
-    # --- LiDAR 2: diagonal corner (north-east), facing field center ---
+    # --- LiDAR 2: north, field-X-centred, facing south (field center) ---
     lidar2_topic: "/lidar2/points"
-    lidar2_x:     31.5
+    lidar2_x:     15.0
     lidar2_y:     21.5
-    lidar2_z:      1.5
+    lidar2_z:      2.0
     lidar2_roll:   0.0
     lidar2_pitch:  0.0
-    lidar2_yaw:   -2.5322     # faces field center (15,10) from NE corner
+    lidar2_yaw:   -1.5708     # faces field center (15,10) from north
 
     # Max age (s) of a sensor's buffered cloud before it is dropped from
     # fusion. 0.25s = 2.5× the 10Hz frame period → tolerates one lost frame.
@@ -57,7 +62,7 @@ lidar_drone_tracker:
     # Voxel downsampling
     # ---------------------------------------------------------------
     # 5cm leaf: preserves shape detail on 50cm drone while reducing
-    # raw 65536-point cloud (~99% of ground plane) to manageable size
+    # raw point cloud (~99% of ground plane) to manageable size
     voxel_leaf_size: 0.05
 
     # ---------------------------------------------------------------
@@ -88,15 +93,16 @@ lidar_drone_tracker:
     # ---------------------------------------------------------------
     # DBSCAN clustering  (equivalent to PCL EuclideanClusterExtraction)
     #
-    # eps=40cm: max inter-point distance within a cluster. At 20-30m the
-    #   drone's few hits are spread across its 0.5m body (~0.1-0.4m apart),
-    #   so 25cm was too tight to chain them — 40cm reliably links them while
-    #   still well below the spacing to any other object in the open field.
-    # min_points=2: at long range a single LiDAR yields only 2-4 hits on the
-    #   50cm drone. 3 was dropping detections intermittently; 2 recovers them.
-    #   (False 2-point noise clusters are rejected by the nearest-to-track
-    #    selection below — the ROI z-band already keeps the ground out.)
+    # eps=40cm: max inter-point distance within a cluster.
+    # min_points=2: at long range a single LiDAR yields only a few hits on
+    #   the 50cm drone. (False 2-point noise clusters are rejected by the
+    #   nearest-to-track selection below — the ROI z-band already keeps the
+    #   ground out.)
     # max_points=400: drone at closest approach rarely exceeds this.
+    #
+    # NOTE: not re-tuned for OS1-128's much finer angular resolution
+    # (~0.33° vs OS0-SR's ~1.42°) — expect denser clusters in practice;
+    # revisit after real flight logs if clustering looks off.
     # ---------------------------------------------------------------
     cluster_tolerance:  0.40
     cluster_min_points: 2
@@ -132,11 +138,10 @@ lidar_drone_tracker:
     # proc_noise_vel: velocity can change ~0.3m/s per frame (≈3m/s²
     #   acceleration), tuned to drone's typical manoeuvre envelope.
     #
-    # meas_noise_pos=15cm: composed of
-    #   • raw LiDAR range noise:       0.8cm (gaussian, per-point)
-    #   • centroid estimation error:   ~5–15cm (sparse side-view cluster)
-    #   Conservative value to keep the KF from over-trusting noisy
-    #   centroids when the drone is partially occluded.
+    # meas_noise_pos=15cm: kept the same as the OS0-SR config — the
+    #   dominant term is centroid estimation error from a sparse cluster
+    #   (~5-15cm), not raw range noise (OS1 is actually better here: 0.5cm
+    #   vs OS0-SR's 0.8cm), so this doesn't need retuning for OS1.
     # ---------------------------------------------------------------
     proc_noise_pos: 0.05
     proc_noise_vel: 0.30

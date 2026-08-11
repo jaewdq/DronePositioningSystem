@@ -59,7 +59,7 @@ SERIES_1 = '#2a78d6'   # blue   — 수평오차 / 호버
 SERIES_2 = '#eb6834'   # orange — 이동
 SERIES_3 = '#1baf7a'   # aqua   — 수직오차
 
-# 필드 사양 (generate_competition_map_os1.py 와 동일하게 유지)
+# 필드 사양 (generate_competition_map.py 와 동일하게 유지)
 AREA_X, AREA_Y = 30.0, 20.0
 N_CELLS_X, N_CELLS_Y = 7, 5
 
