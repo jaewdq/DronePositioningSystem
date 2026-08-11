@@ -169,6 +169,7 @@ class LidarDroneTracker(Node):
         # 클러스터 모양 덤프 (cluster_dump_path 가 설정된 경우에만 수집)
         self._dump = [] if self.cluster_dump_path else None
         self._last_sel_pts = None
+        self._last_sel_mask = None
 
         # Waypoint (마커) 호버 감지 상태
         self._wp_active_id = None
@@ -477,14 +478,24 @@ class LidarDroneTracker(Node):
             t1 = valid[1][2].sec + valid[1][2].nanosec * 1e-9
             if abs(t0 - t1) < 0.05:  # 50ms 이내만 융합
                 pts_w = np.concatenate([valid[0][1], valid[1][1]], axis=0)
-                self._process_cloud(pts_w, header)
+                # 합치고 나면 어느 점이 어느 센서에서 왔는지 알 수 없다.
+                # 융합 방식(밀도가중 vs 동일가중)을 사후 비교하려면 출처가
+                # 필요하므로, 이어붙이는 순서 그대로 센서 인덱스를 남긴다.
+                src = np.concatenate([
+                    np.full(len(valid[0][1]), valid[0][0], dtype=np.int8),
+                    np.full(len(valid[1][1]), valid[1][0], dtype=np.int8)])
+                self._process_cloud(pts_w, header, src)
             else:
                 # 시간차 너무 크면 최신 것만 사용
-                pts_w = valid[0][1] if t0 > t1 else valid[1][1]
-                self._process_cloud(pts_w, header)
+                k = 0 if t0 > t1 else 1
+                self._process_cloud(
+                    valid[k][1], header,
+                    np.full(len(valid[k][1]), valid[k][0], dtype=np.int8))
         else:
             # LiDAR 1개만 유효한 경우
-            self._process_cloud(valid[0][1], header)
+            self._process_cloud(
+                valid[0][1], header,
+                np.full(len(valid[0][1]), valid[0][0], dtype=np.int8))
 
         self._maybe_log_stats(now)
 
@@ -540,8 +551,13 @@ class LidarDroneTracker(Node):
         self._stat_fail = dict.fromkeys(self._stat_fail, 0)
         self._stat_rej_small = self._stat_rej_big = 0
 
-    def _process_cloud(self, pts_w: np.ndarray, header: Header):
-        """Run the full pipeline on the fused world-frame cloud, step KF."""
+    def _process_cloud(self, pts_w: np.ndarray, header: Header,
+                       src: np.ndarray | None = None):
+        """Run the full pipeline on the fused world-frame cloud, step KF.
+
+        src는 점별 출처 센서 인덱스(0/1). 클러스터 덤프에만 쓰이며 파이프라인
+        동작에는 영향이 없다. 점을 걸러낼 때마다 같은 마스크를 태그에도
+        적용해 순서를 맞춰야 한다."""
         self._stat_frames += 1
         self._stat_merged_pts += len(pts_w)
         # ROI filter in world frame (drops inf/nan-origin points too, since
@@ -552,7 +568,16 @@ class LidarDroneTracker(Node):
             (pts_w[:, 2] >= self.roi_z_min) & (pts_w[:, 2] <= self.roi_z_max)
         )
         pts_w = pts_w[mask]
-        if len(pts_w) < 10:
+        if src is not None:
+            src = src[mask]
+        # 예전엔 여기가 하드코딩 10이었다. ROI가 z 0~6m로 넓어 바닥까지
+        # 들어오던 시절에는 "10점 미만 = 센서가 아무것도 못 봄"이 맞았지만,
+        # ROI를 호버 고도 띠(1~3m)로 좁힌 뒤로는 그 안에 드론밖에 없다.
+        # 드론이 내놓는 점은 중앙값 14개, 원거리에선 3~7개라 문턱 10이
+        # 정상 검출을 통째로 버리고 있었다(검출률 37%의 주범).
+        # 군집화 최소 점수와 같은 기준으로 낮춘다 — 그 이하면 어차피
+        # DBSCAN이 클러스터를 못 만든다.
+        if len(pts_w) < self.min_pts:
             self._stat_fail['roi'] += 1
             self._coast(header)
             return
@@ -610,15 +635,26 @@ class LidarDroneTracker(Node):
             self._stat_detect += 1
             self._stat_cluster_pts += self._last_sel_n
             if self._dump is not None and self._last_sel_pts is not None:
-                # 프레임마다 (시각, 점들, 센트로이드)를 모아 close()에서 한 번에 저장
+                # 프레임마다 (시각, 점들, 센트로이드, 출처센서)를 모아
+                # close()에서 한 번에 저장.
+                # src는 ROI까지만 통과한 상태라 pts_f와 길이·순서가 같다.
+                # voxel/SOR을 다시 켜면 그 전제가 깨지므로 길이를 확인하고,
+                # 어긋나면 태그를 포기한다(-1 = 출처 미상).
+                if src is not None and len(src) == len(pts_f):
+                    tags = src[self._last_sel_mask].astype(np.int8)
+                else:
+                    tags = np.full(self._last_sel_n, -1, dtype=np.int8)
                 self._dump.append((
                     header.stamp.sec + header.stamp.nanosec * 1e-9,
                     self._last_sel_pts.astype(np.float32).copy(),
-                    centroid.astype(np.float32).copy()))
+                    centroid.astype(np.float32).copy(),
+                    tags))
             if not self._kf.initialized:
                 self._kf.init(centroid)
             else:
-                self._kf.update(centroid)
+                # 관측 반영은 별도 훅으로 뺀다. 파생 클래스가 센서별 순차
+                # 업데이트 등 다른 융합 방식을 끼워넣을 수 있게 하는 자리다.
+                self._apply_measurement(centroid, pts_f, src, header)
             self._coast_count = 0
             self._update_waypoint_tracking(centroid)
         else:
@@ -638,6 +674,13 @@ class LidarDroneTracker(Node):
 
         if self._kf.initialized:
             self._publish_pose(header)
+
+    def _apply_measurement(self, centroid, pts_f, src, header):
+        """선택된 클러스터를 KF에 반영. 기본 구현은 융합 센트로이드 1회 갱신.
+
+        pts_f/src는 파생 클래스가 센서별로 나눠 쓰라고 넘긴다(기본은 미사용).
+        `self._last_sel_mask`로 선택 클러스터에 해당하는 부분을 고를 수 있다."""
+        self._kf.update(centroid)
 
     # ------------------------------------------------------------------
     # Drone cluster selection
@@ -744,7 +787,8 @@ class LidarDroneTracker(Node):
 
         self._last_sel_n = candidates[0][2]
         if self._dump is not None:
-            self._last_sel_pts = pts[labels == candidates[0][0]]
+            self._last_sel_mask = labels == candidates[0][0]
+            self._last_sel_pts = pts[self._last_sel_mask]
         return candidates[0][1]
 
     # ------------------------------------------------------------------
@@ -910,14 +954,18 @@ class LidarDroneTracker(Node):
         counts = np.array([len(d[1]) for d in self._dump], dtype=np.int32)
         pts = np.concatenate([d[1] for d in self._dump], axis=0)
         cents = np.stack([d[2] for d in self._dump], axis=0)
+        srcs = np.concatenate([d[3] for d in self._dump], axis=0)
         offsets = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
         path = os.path.expanduser(self.cluster_dump_path)
         os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
         np.savez_compressed(path, times=times, points=pts, offsets=offsets,
-                            centroids=cents)
+                            centroids=cents, sources=srcs)
+        n1 = int((srcs == 0).sum())
+        n2 = int((srcs == 1).sum())
         self.get_logger().info(
             f'클러스터 덤프 저장: {path} '
-            f'({len(times)}프레임, 점 {len(pts)}개)')
+            f'({len(times)}프레임, 점 {len(pts)}개 — '
+            f'{self._sensors[0].name} {n1}개 / {self._sensors[1].name} {n2}개)')
 
     # ------------------------------------------------------------------
     # PointCloud2 utilities

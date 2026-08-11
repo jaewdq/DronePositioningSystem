@@ -26,12 +26,15 @@ setup(
     entry_points={
         'console_scripts': [
             'lidar_drone_tracker = drone_localization.lidar_drone_tracker:main',
+            'lidar_drone_tracker_fusion = drone_localization.lidar_drone_tracker_fusion:main',
             'flight_recorder = drone_localization.flight_recorder:main',
             'plot_flight = drone_localization.plot_flight:main',
             'analyze_waypoints = drone_localization.analyze_waypoints:main',
             'plot_flight_3d = drone_localization.plot_flight_3d:main',
             'evaluate_accuracy = drone_localization.evaluate_accuracy:main',
             'plot_accuracy = drone_localization.plot_accuracy:main',
+            'plot_summary = drone_localization.plot_summary:main',
+            'compare_fusion = drone_localization.compare_fusion:main',
             'plot_cluster_shape = drone_localization.plot_cluster_shape:main',
             'archive_run = drone_localization.archive_run:main',
             'plot_runs = drone_localization.plot_runs:main',

@@ -6,10 +6,12 @@ evaluate_accuracy.py가 콘솔로 내는 수치를 그림 한 장으로 정리�
 숫자 자체는 같은 계산을 쓰므로 두 도구의 결과는 항상 일치한다.
 
 패널 구성:
-  A 경로점별 수평오차 + 채점기준선 — "기준 대비 얼마나 여유 있나"
-  B 핵심 수치 요약 (hero numbers)
-  C 경로점별 수직오차 + bias/std 분해 — "계통오차와 정밀도 분리"
-  D 구간별 수평오차 누적분포 — "표본의 몇 %가 어느 오차 안에 드나"
+  A 전체 측위 경로 비교 (3D) — 오차가 어느 구간에서 생겼나
+  B 경로점별 수평오차 — 방문마다 얼마나 어긋났나
+  C 경로점별 수직오차 + bias/std 분해 — 계통오차와 정밀도 분리
+
+핵심 수치는 별도 패널 없이 헤더에 둔다(전에는 패널 하나를 통째로 썼는데
+헤더와 내용이 겹쳐 자리만 차지했다).
 
 사용법:
   python3 plot_accuracy.py                # 어디서든 바로 실행 가능
@@ -57,8 +59,9 @@ SERIES_1 = '#2a78d6'   # blue   — 수평오차 / 호버
 SERIES_2 = '#eb6834'   # orange — 이동
 SERIES_3 = '#1baf7a'   # aqua   — 수직오차
 
-# 채점기준 "상" 임계 (수평/수직 공통)
-THRESHOLD_HIGH = 0.5
+# 필드 사양 (generate_competition_map_os1.py 와 동일하게 유지)
+AREA_X, AREA_Y = 30.0, 20.0
+N_CELLS_X, N_CELLS_Y = 7, 5
 
 
 def _setup_font():
@@ -106,6 +109,12 @@ def _compute(out_dir, auto_align, speed_threshold, gate_radius,
     speed = _smoothed_speed(te, xa, ya)
     hover = speed <= speed_threshold
 
+    # 비행시간은 실측 로그 전체가 아니라 "떠 있던 구간"으로 잰다. 기록을
+    # 일찍 켜거나 늦게 끄면 지상 대기 시간이 통째로 섞이기 때문.
+    ta_all, _, _, za_all = actual
+    air = za_all > 0.5
+    flight_sec = float(ta_all[air][-1] - ta_all[air][0]) if air.any() else 0.0
+
     visits = []
     markers = _load_markers()
     if markers is not None:
@@ -128,6 +137,9 @@ def _compute(out_dir, auto_align, speed_threshold, gate_radius,
             })
 
     return {'te': te, 'exy': exy, 'ez': ez, 'hover': hover,
+            'ex': xe - xa, 'ey': ye - ya,
+            'xa': xa, 'ya': ya, 'za': za, 'xe': xe, 'ye': ye, 'ze': ze,
+            'markers': markers, 'flight_sec': flight_sec,
             'visits': visits, 'lag': lag, 'auto_align': auto_align}
 
 
@@ -141,59 +153,21 @@ def _panel_waypoint_xy(ax, visits):
         ax.text(x, v + 0.012, f'{v:.3f}', ha='center', va='bottom',
                 fontsize=8, color=INK_SECONDARY, zorder=4)
 
-    ax.axhline(THRESHOLD_HIGH, color=INK_MUTED, lw=1.0, ls='--', zorder=2)
-    ax.text(len(vals) - 0.4, THRESHOLD_HIGH - 0.022,
-            f'채점기준 "상"  < {THRESHOLD_HIGH}m', ha='right', va='top',
-            fontsize=8.5, color=INK_SECONDARY)
-
     mean = float(vals.mean())
     ax.axhline(mean, color=SERIES_1, lw=0.9, ls=':', alpha=0.8, zorder=2)
     # 막대와 겹치지 않도록 기준선 라벨은 오른쪽 끝 위에 둔다.
-    ax.text(len(vals) - 0.4, mean + 0.014, f'평균 {mean:.3f}m',
+    ax.text(len(vals) - 0.4, mean + 0.004, f'평균 {mean:.3f}m',
             ha='right', va='bottom', fontsize=8.5, color=SERIES_1)
 
     ax.set_xticks(xs)
     ax.set_xticklabels(labels, fontsize=8.5, color=INK_SECONDARY)
-    ax.set_ylim(0, THRESHOLD_HIGH * 1.12)
+    # 축은 실제 값에 맞춘다. 채점기준(0.5m)에 맞춰 잡으면 막대가 아래
+    # 1/3에만 몰려 값끼리 비교가 안 된다.
+    ax.set_ylim(0, vals.max() * 1.28)
     ax.set_ylabel('수평오차 [m]', fontsize=9, color=INK_SECONDARY)
-    ax.set_title('A. 경로점별 수평오차', fontsize=11, color=INK_PRIMARY,
+    ax.set_title('B. 경로점별 수평오차', fontsize=11, color=INK_PRIMARY,
                  loc='left', pad=10)
     _style(ax)
-
-
-def _panel_summary(ax, d):
-    ax.axis('off')
-    vx = np.array([v['err_xy'] for v in d['visits']])
-    vz = np.array([v['err_z'] for v in d['visits']])
-    hov = d['exy'][d['hover']]
-
-    # 단위는 라벨에 넣는다. 큰 숫자 옆에 별도 text로 붙이면 폭을 미리 알 수
-    # 없어 겹친다.
-    tiles = [
-        ('경로점 수평 RMSE [m]', f'{np.sqrt((vx ** 2).mean()):.3f}', SERIES_1),
-        ('경로점 수평 평균 [m]', f'{vx.mean():.3f}', SERIES_1),
-        ('수직 정밀도 std [m]', f'{vz.std():.3f}', SERIES_3),
-        ('호버 수평 평균 [m]', f'{hov.mean():.3f}', SERIES_1),
-    ]
-    for i, (label, value, color) in enumerate(tiles):
-        col, row = i % 2, i // 2
-        x, y = 0.06 + col * 0.50, 0.70 - row * 0.42
-        ax.text(x, y + 0.13, label, fontsize=9, color=INK_SECONDARY,
-                transform=ax.transAxes)
-        ax.text(x, y - 0.06, value, fontsize=26, color=color, weight='bold',
-                transform=ax.transAxes)
-        # 값 왼쪽의 얇은 색 막대로 계열을 표시 (텍스트는 ink 유지)
-        ax.plot([x - 0.022, x - 0.022], [y - 0.075, y + 0.16],
-                color=color, lw=2.5, transform=ax.transAxes,
-                clip_on=False, solid_capstyle='round')
-
-    n = len(d['visits'])
-    note = (f'경로점 {n}개 · 수직 bias {vz.mean():+.3f}m'
-            '(센트로이드 정의차)')
-    ax.text(0.04, 0.02, note, fontsize=8.5, color=INK_MUTED,
-            transform=ax.transAxes)
-    ax.set_title('B. 핵심 수치', fontsize=11, color=INK_PRIMARY,
-                 loc='left', pad=10)
 
 
 def _panel_waypoint_z(ax, visits):
@@ -221,37 +195,68 @@ def _panel_waypoint_z(ax, visits):
     _style(ax)
 
 
-def _panel_cdf(ax, d):
-    def ecdf(v):
-        s = np.sort(v)
-        return s, np.arange(1, len(s) + 1) / len(s) * 100.0
+def _panel_track3d(ax, d, z_exag=3.0):
+    """전체 궤적 3D 비교 — 실측 위에 추정을 겹친다.
 
-    for vals, color, name in ((d['exy'][d['hover']], SERIES_1, '호버'),
-                              (d['exy'][~d['hover']], SERIES_2, '이동')):
-        if len(vals) < 2:
-            continue
-        x, y = ecdf(vals)
-        ax.plot(x, y, color=color, lw=2.0, label=f'{name} (n={len(vals)})',
-                zorder=3)
-        med = float(np.median(vals))
-        ax.plot([med], [50], 'o', ms=6, color=color, mec=SURFACE, mew=1.5,
-                zorder=4)
+    통계는 "얼마나 틀렸나"만 말해주지, 그 오차가 어디서 어떻게 생겼는지는
+    못 보여준다. 궤적을 겹쳐 그리면 코너·직선·호버 중 어디가 문제인지
+    한눈에 잡힌다. 평면도로는 고도 성분이 사라지므로 3D로 그린다.
 
-    ax.axvline(THRESHOLD_HIGH, color=INK_MUTED, lw=1.0, ls='--', zorder=2)
-    ax.text(THRESHOLD_HIGH - 0.02, 8, f'{THRESHOLD_HIGH}m', ha='right',
-            fontsize=8.5, color=INK_SECONDARY)
+    z_exag: 필드가 30x20m인데 고도는 2m뿐이라 실척으로는 Z가 납작해져
+    고도 변화가 안 보인다. Z축만 늘려 프로파일이 읽히게 한다."""
+    zf = 0.0
+    for i in range(N_CELLS_X + 1):
+        x = i * AREA_X / N_CELLS_X
+        ax.plot([x, x], [0, AREA_Y], [zf, zf], color=GRIDLINE, lw=0.5)
+    for j in range(N_CELLS_Y + 1):
+        y = j * AREA_Y / N_CELLS_Y
+        ax.plot([0, AREA_X], [y, y], [zf, zf], color=GRIDLINE, lw=0.5)
+    ax.plot([0, AREA_X, AREA_X, 0, 0], [0, 0, AREA_Y, AREA_Y, 0], [zf] * 5,
+            color=BASELINE, lw=1.1)
 
-    ax.set_xlabel('수평오차 [m]', fontsize=9, color=INK_SECONDARY)
-    ax.set_ylabel('누적 비율 [%]', fontsize=9, color=INK_SECONDARY)
-    ax.set_ylim(0, 102)
-    ax.set_xlim(0, max(0.62, float(np.percentile(d['exy'], 99))))
-    ax.set_title('D. 수평오차 누적분포 (전체 표본)', fontsize=11,
-                 color=INK_PRIMARY, loc='left', pad=10)
-    leg = ax.legend(fontsize=8.5, frameon=False, loc='lower right')
+    ax.plot(d['xa'], d['ya'], d['za'], '-', color=INK_SECONDARY, lw=2.4,
+            alpha=0.5, label='실측 (PX4)')
+    ax.plot(d['xe'], d['ye'], d['ze'], '-', color=SERIES_2, lw=1.1,
+            label='LiDAR 추정')
+
+    markers = d.get('markers')
+    if markers:
+        mx = [p[0] for p in markers.values()]
+        my = [p[1] for p in markers.values()]
+        ax.scatter(mx, my, [zf] * len(mx), marker='s', s=42,
+                   facecolors=INK_SECONDARY, edgecolors=SURFACE,
+                   linewidths=1.0, depthshade=False)
+        for mid, (x, y) in markers.items():
+            ax.text(x, y, zf + 0.22, f'id{mid}', fontsize=8,
+                    ha='center', color=INK_SECONDARY)
+    ax.scatter([0], [0], [zf], marker='o', s=52, facecolors='none',
+               edgecolors=INK_MUTED, linewidths=1.3, depthshade=False)
+
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        axis.pane.fill = False
+        axis.pane.set_edgecolor(GRIDLINE)
+        axis.line.set_color(BASELINE)
+        axis._axinfo['grid'].update(color=GRIDLINE, linewidth=0.5)
+        axis.set_tick_params(colors=INK_MUTED, labelsize=7.5)
+    ax.set_facecolor(SURFACE)
+
+    zmax = max(float(np.max(d['za'])), float(np.max(d['ze'])), 2.5)
+    ax.set_xlim(-1, AREA_X + 1)
+    ax.set_ylim(-2, AREA_Y + 2)
+    ax.set_zlim(0, zmax * 1.1)
+    try:
+        ax.set_box_aspect((AREA_X + 2, AREA_Y + 4, zmax * 1.1 * z_exag))
+    except Exception:
+        pass  # 구버전 matplotlib
+    ax.set_xlabel('X [m]', fontsize=8.5, color=INK_SECONDARY, labelpad=-2)
+    ax.set_ylabel('Y [m]', fontsize=8.5, color=INK_SECONDARY, labelpad=-2)
+    ax.set_zlabel('고도 [m]', fontsize=8.5, color=INK_SECONDARY, labelpad=-4)
+    ax.view_init(elev=26, azim=-62)
+    ax.set_title(f'A. 전체 측위 경로 비교 (3D, Z {z_exag:.0f}배 강조)',
+                 fontsize=11, color=INK_PRIMARY, loc='left', pad=2)
+    leg = ax.legend(fontsize=8.5, frameon=False, loc='upper right')
     for t in leg.get_texts():
         t.set_color(INK_SECONDARY)
-    _style(ax)
-    ax.grid(True, axis='x', color=GRIDLINE, lw=0.6, zorder=0)
 
 
 def main():
@@ -263,6 +268,8 @@ def main():
     ap.add_argument('--gate_radius', type=float, default=4.5)
     ap.add_argument('--min_duration', type=float, default=0.4)
     ap.add_argument('--merge_gap', type=float, default=1.0)
+    ap.add_argument('--z_exag', type=float, default=3.0,
+                    help='3D 궤적의 Z축 표시 배율 (1.0=실제 비율)')
     ap.add_argument('--save_only', action='store_true')
     args, _ = ap.parse_known_args()
 
@@ -277,27 +284,61 @@ def main():
         return
 
     _setup_font()
+    # 이 PC에는 apt/pip matplotlib이 섞여 있어 mpl_toolkits가 옛 버전으로
+    # 잡히면 Axes3D import가 깨진다. plot_flight_3d가 쓰는 교정을 그대로 사용.
+    from drone_localization.plot_flight_3d import _fix_mpl_toolkits
+    _fix_mpl_toolkits()
     import matplotlib
     if args.save_only:
         matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    from mpl_toolkits.mplot3d import Axes3D  # noqa: F401  (3d projection 등록)
 
-    fig = plt.figure(figsize=(13.5, 8.4), facecolor=SURFACE)
-    gs = fig.add_gridspec(2, 2, hspace=0.42, wspace=0.20,
-                          left=0.07, right=0.97, top=0.87, bottom=0.09)
+    # 수치 전용 패널은 헤더와 내용이 겹쳐 자리만 차지했다. 숫자는 헤더로
+    # 올리고, 남은 공간을 실제 그래프에 준다.
+    #   위  경로점 수평오차 (채점기준선까지 보여야 해서 가로로 길게)
+    #   아래 수직오차 | 누적분포
+    # 수치 전용 패널은 헤더와 내용이 겹쳐 자리만 차지했다. 숫자는 헤더로
+    # 올리고, 남은 공간을 실제 그래프에 준다. 헤더가 3층(제목/부제/수치)이라
+    # top을 넉넉히 내려야 A 패널 제목과 부딪히지 않는다.
+    # 3D 궤적은 왼쪽 세로 칸에, 막대 둘은 오른쪽에 쌓는다.
+    fig = plt.figure(figsize=(14.5, 8.2), facecolor=SURFACE)
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.1, 1],
+                          hspace=0.38, wspace=0.10,
+                          left=0.02, right=0.975, top=0.775, bottom=0.075)
 
-    _panel_waypoint_xy(fig.add_subplot(gs[0, 0]), d['visits'])
-    _panel_summary(fig.add_subplot(gs[0, 1]), d)
-    _panel_waypoint_z(fig.add_subplot(gs[1, 0]), d['visits'])
-    _panel_cdf(fig.add_subplot(gs[1, 1]), d)
+    _panel_track3d(fig.add_subplot(gs[:, 0], projection='3d'), d, args.z_exag)
+    _panel_waypoint_xy(fig.add_subplot(gs[0, 1]), d['visits'])
+    _panel_waypoint_z(fig.add_subplot(gs[1, 1]), d['visits'])
 
-    align_note = (f'처리지연 {abs(d["lag"]):.2f}s 보정' if d['auto_align']
-                  else f'지연 보정 없음 (추정이 실측보다 {abs(d["lag"]):.2f}s 뒤처짐)')
-    fig.text(0.07, 0.945, '지상 LiDAR 측위 정확도', fontsize=16,
+    vx = np.array([v['err_xy'] for v in d['visits']])
+    vz = np.array([v['err_z'] for v in d['visits']])
+    m, s = divmod(int(round(d['flight_sec'])), 60)
+    flight_txt = f'{m}분 {s}초' if m else f'{s}초'
+
+    fig.text(0.065, 0.965, '지상 LiDAR 측위 정확도', fontsize=16,
              color=INK_PRIMARY, weight='bold')
-    fig.text(0.07, 0.905,
-             f'기준: PX4 실측 위치 · 표본 {len(d["te"])}개 · {align_note}',
+    # 수직 bias는 오차가 아니라 기준점 정의 차이라, 수치 타일이 아니라
+    # 부제에 함께 적어 성격을 구분한다.
+    fig.text(0.065, 0.933,
+             f'기준 PX4 실측 · 비행시간 {flight_txt} · 표본 {len(d["te"])}개 · '
+             f'경로점 {len(vx)}개 · 수직 bias {vz.mean():+.3f}m(센트로이드 정의차)',
              fontsize=9.5, color=INK_MUTED)
+
+    # 축별 평균오차. 부호를 살려 적는다 — 절대값으로 뭉개면 "어느 쪽으로
+    # 치우쳤나"가 사라지는데, 그게 편향을 읽는 유일한 단서다.
+    tiles = [('X 평균오차', f'{d["ex"].mean():+.3f}', SERIES_1),
+             ('Y 평균오차', f'{d["ey"].mean():+.3f}', SERIES_1),
+             ('Z 평균오차', f'{d["ez"].mean():+.3f}', SERIES_3),
+             ('경로점 수평 RMSE', f'{np.sqrt((vx ** 2).mean()):.3f}', SERIES_1)]
+    for i, (label, value, color) in enumerate(tiles):
+        x = 0.075 + i * 0.235
+        fig.text(x, 0.882, label, fontsize=8.5, color=INK_MUTED)
+        fig.text(x, 0.837, value, fontsize=20, color=color, weight='bold')
+        fig.text(x + 0.070, 0.842, 'm', fontsize=9.5, color=INK_MUTED)
+        fig.lines.append(plt.Line2D(
+            [x - 0.010, x - 0.010], [0.832, 0.897], transform=fig.transFigure,
+            color=color, lw=2.4, solid_capstyle='round'))
 
     out_png = os.path.join(args.output_dir, 'accuracy_summary.png')
     fig.savefig(out_png, dpi=150, facecolor=SURFACE)
