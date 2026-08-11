@@ -21,16 +21,20 @@ PX4 SITL + Gazebo Harmonic + ROS2 Humble 환경에서 동작한다.
 - 비행 후 **경로점(마커) 위 호버 구간을 자동 검출**해 마커별 위치를 재추정 → 채점 근거 산출
 - 실제 비행 궤적(PX4 ground-truth)과 비교·시각화하는 분석 도구 포함
 
-### 현재 성능 (OS1-128 / ns 배치 / 1회 비행)
+### 현재 성능 (OS1-128 / ns 배치 / 정상 비행 4회 · 경로점 28개)
 
 | 항목 | 값 |
 |---|---|
-| 수평(XY) 오차 | median **0.099 m**, RMS 0.207 m |
-| 수직(Z) 오차 | bias **−0.007 m**, std **0.048 m** ※ 기준면 정렬 후 — [§6.1](#61--z-기준면datum이-정의되지-않음--채점-방식-미결) 참조 |
-| 경로점 검출 | 7/7회 (오프라인 분석기, 미션 방문순서 1→2→3→4→3→2→1 일치) |
+| 경로점 수평오차 | 평균 **0.089 m**, 중앙 0.082 m, 최대 0.163 m |
+| 경로점 수평 RMSE | **0.095 m** |
+| 런간 재현성 | **0.015 m** (런 평균의 표준편차) |
+| 채점기준 <0.5m 통과 | **28/28 (100%)** |
+| 축별 평균오차 | X +0.055 m, Y −0.012 m |
+| 수직(Z) | bias +0.200 m, **std 0.028 m** — bias는 오차가 아니라 기준점 정의차, [§6.1](#61--z-기준면datum이-정의되지-않음--채점-방식-미결) 참조 |
+| 검출률 | **100%** (비행 구간 전체) |
 
 대회 채점기준(경로점 위치추정 수평오차 <0.5m = 상)에 여유 있게 들어간다.
-단 **1회 비행 결과이며 반복 검증·강건성 시험은 아직 하지 않았다.**
+**강건성 시험(비/안개, 가림)과 배치별 비교는 아직 하지 않았다.**
 
 ---
 
@@ -41,10 +45,19 @@ ros2_ws/src/
   drone_localization/                  # 측위 시스템 (핵심)
     drone_localization/
       lidar_drone_tracker.py           # 2-LiDAR 융합 + KF 추적 노드
-      flight_recorder.py               # 실제/추정 궤적 CSV 기록
+      lidar_drone_tracker_fusion.py    # [실험] 센서별 클러스터링 + KF 2회 갱신 (기본 비활성)
+      flight_recorder.py               # 궤적 CSV 기록 + 착륙 감지 시 자동 보관·시각화
+      archive_run.py                   # 수동 보관 (runNNN/)
       analyze_waypoints.py             # [오프라인] 호버 구간 검출 → 경로점 위치 재추정
+      evaluate_accuracy.py             # 정확도 수치 (콘솔) — 모든 플롯의 계산 원본
+      plot_accuracy.py                 # ★ 정확도 요약 (3D 궤적 + 경로점 수평/수직) — 착륙 시 자동 실행
+      plot_summary.py                  # 간단 요약 (평면 궤적 + X/Y/Z 오차 시계열)
+      plot_runs.py                     # 여러 비행 비교 (재현성)
+      plot_spatial.py                  # 마커별 실제 위치 vs 측정 위치
+      plot_cluster_shape.py            # 클러스터 형상 vs 기체 제원
       plot_flight.py                   # 계획 vs 실제 vs 추정 (평면+고도+3D 요약)
       plot_flight_3d.py                # 전체 경로 3D 전용 뷰
+      compare_fusion.py                # [오프라인] 융합 방식 비교 (밀도가중/동일/역분산)
     params/
       lidar_localization.yaml          # OS0-SR / diag(대각) 배치용
       lidar_localization_os1.yaml      # OS1-128 / ns(남북) 배치용  ← 현재 기본
@@ -65,6 +78,8 @@ gazebo/
     competition_map*_coordinates.txt   # 격자/마커/LiDAR 좌표 (정답지)
   models/
     generate_aruco_markers.py
+    generate_ground_texture.py         # 잔디+흙 바닥 텍스처 생성기 (고정 시드)
+    arena_ground/                      # 생성된 바닥 모델 (grass.png + SDF)
     ground_lidar_sensor/               # OS0-SR 64ch 센서 모델
     ground_lidar_sensor_os1_128/       # OS1-128ch 센서 모델
     aruco_marker_id*/                  # 마커 모델 4개 (두 world 공유)
@@ -91,11 +106,10 @@ docs/
       sensor_msgs/PointCloud2 ×2
               │
               ▼  lidar_drone_tracker
-   월드좌표 변환 → 타임스탬프 동기 융합(50ms 이내)
+   월드좌표 변환 → 신선도 검사(0.25s) → 동시성 검사(50ms) → 융합
    → ROI 필터 (XY: 필드+2m, Z: 1.0~3.0m 호버 밴드)
-   → DBSCAN 클러스터링 → 드론 클러스터 선택(최근접 + 게이트)
-   → 클러스터 median = 드론 위치
-   → KF predict/update (6상태 등속도)
+   → DBSCAN 클러스터링 → KF predict → 클러스터 선택(최근접 + 적응 게이트)
+   → 클러스터 median = 드론 위치 → KF update (6상태 등속도)
               │
               ▼
      /drone/estimated_pose  ──▶ flight_recorder ──▶ estimated_path.csv
@@ -104,9 +118,23 @@ docs/
                                                           │
                                     ┌─────────────────────┴────────────┐
                                     ▼                                  ▼
-                          analyze_waypoints                    plot_flight / _3d
-                    (호버 구간 → 경로점 위치 재추정)          (궤적 오버레이 + 오차)
+                          analyze_waypoints              plot_accuracy (착륙 시 자동)
+                    (호버 구간 → 경로점 위치 재추정)      evaluate_accuracy / plot_runs
 ```
+
+### 두 LiDAR를 합치는 방식
+
+두 LiDAR는 동기화 없이 각자 퍼블리시한다. 수신 즉시 센서 좌표를 월드 좌표로 변환해
+센서별 버퍼에 **최신 것만** 저장하고(큐가 아닌 단일 슬롯), 별도의 10Hz 타이머가 버퍼를
+검사한다.
+
+- **신선도** — 받은 지 0.25초가 지났으면 센서 두절로 보고 제외
+- **동시성** — 남은 것들의 *촬영* 시각 차이가 50ms 이내일 때만 합침. 벗어나면 최신 것만 사용
+
+시간이 벌어진 스캔을 합치지 않는 이유는 형상이 왜곡되기 때문이다. 1.5m/s로 날 때 0.1초
+차이는 15cm 이동에 해당하고, 그대로 병합하면 드론이 진행 방향으로 늘어난 것처럼 관측되어
+중심이 틀어진다. 두 센서 모두 10Hz라 100ms 주기에서 가장 가까운 짝의 시간차는 구조적으로
+최대 50ms이므로, 실측에서는 두 센서 모두 전체 프레임의 100%에 기여한다.
 
 ### 설계상 중요한 선택들
 
@@ -121,6 +149,14 @@ docs/
   부정확한 팀은 표본이 아예 안 잡혀 채점 자체가 불가능해진다.
 - **경로점 산출은 오프라인이 정본.** 노드 안의 실시간 검출도 살아 있지만 조각남 문제가
   있다 ([§6.2](#62-실시간-경로점-검출이-하나의-호버를-여러-조각으로-나눔)).
+- **연관 게이트는 KF 공분산에 비례.** 고정값이면 예측이 한번 밀린 뒤 진짜 드론이
+  게이트 밖으로 밀려나고, 관측이 끊기니 예측이 더 밀리는 악순환이 생긴다. 다만 잡동사니를
+  물지 않도록 상한을 둔다.
+- **predict → 연관 → update 순서.** 연관을 먼저 하면 직전 프레임의 사후추정값을 기준으로
+  비교하게 되어, 1.5m/s에서 0.15m를 그냥 버리는 셈이 된다.
+- **ROI 통과 최소 점수는 `cluster_min_points`와 동일.** 예전에는 10으로 하드코딩돼
+  있었는데, ROI를 z-band로 좁힌 뒤로는 그 안에 드론밖에 없어서(중앙값 14점, 원거리 3~7점)
+  정상 검출을 통째로 버리고 있었다 ([§6.7](#67-해결됨-roi-최소-점수-문턱값이-검출을-막고-있었음)).
 
 ---
 
@@ -151,40 +187,71 @@ colcon build --packages-select drone_localization drone_mission
 source install/setup.bash
 ```
 
-### 최소 실행 (측위 동작 확인)
+### 사전 설정 — ROS2 도메인 격리 (권장)
+
+같은 LAN에 다른 PC가 기본 도메인(0)으로 ROS2를 돌리면 노드와 토픽이 섞인다. 실제로 남의
+미션 노드가 우리 PX4에 offboard 명령을 보내 드론이 엉뚱하게 나는 일이 있었다. `~/.bashrc`에:
+
+```bash
+export ROS_DOMAIN_ID=2       # 0~101 중 다른 사람과 겹치지 않는 값
+export GZ_PARTITION=<이름>   # Gazebo transport는 DDS와 별개라 따로 막아야 함
+export GZ_IP=127.0.0.1
+```
+
+QGC는 MAVLink(UDP)라 위 설정이 안 통한다. 남의 PX4에 붙는 게 의심되면 QGC의
+Application Settings → Comm Links에서 자동연결(UDP)을 끄고 `127.0.0.1:14550` 수동 링크를
+만들면 된다.
+
+### 실행
 
 ```bash
 # 터미널 1 — PX4 SITL + Gazebo
 cd ~/drone_project/PX4-Autopilot
-PX4_GZ_WORLD=competition_map_os1 make px4_sitl gz_x500
+PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=competition_map_os1 make px4_sitl gz_x500
 
 # 터미널 2 — Micro-XRCE-DDS Agent
 MicroXRCEAgent udp4 -p 8888
 
-# 터미널 3 — 측위 시스템 (브릿지 + 추적 노드)
+# 터미널 3 — QGroundControl (상태 확인용)
+~/Applications/QGroundControl.AppImage
+
+# 터미널 4 — 측위 시스템 (브릿지 + 추적 노드)
 ros2 launch drone_localization lidar_localization.launch.py \
     params_file:=lidar_localization_os1.yaml
 
-# 터미널 4 — 궤적 비행
+# 터미널 5 — 비행 기록 (비행 전에 켜 둘 것)
+ros2 run drone_localization flight_recorder
+
+# 터미널 6 — 궤적 비행
 ros2 run drone_mission competition_mission
 ```
 
 > world와 params는 **반드시 짝을 맞춰야** 한다 (`competition_map_os1` ↔
 > `lidar_localization_os1.yaml`). 센서 위치·높이가 달라 섞으면 측위가 통째로 어긋난다.
+>
+> `PX4_GZ_NO_FOLLOW=1`을 빼면 드론 스폰 시 카메라가 드론에 고정돼 시점 조작이 안 된다.
 
-### 오차 분석까지 하려면
+`flight_recorder`는 **착륙을 자동 감지**해서 그 비행을 `runNNN/`으로 보관하고 정확도
+그림을 띄운 뒤, 새 CSV를 열어 다음 비행을 바로 기록한다. 노드를 껐다 켤 필요가 없고,
+반복 측정 시 이전 데이터가 덮어써지지 않는다. Ctrl+C로 끝내도 같은 처리를 한다.
+
+### 분석 도구
+
+전부 오프라인 스크립트라 `python3`로 바로 실행된다 (`--output_dir`로 특정 런 지정 가능):
 
 ```bash
-# 비행 "전"에 켜서 착륙까지 끄지 말 것 (중간에 켜면 로그가 잘려 분석 불가)
-ros2 run drone_localization flight_recorder
-```
+DPS=~/drone_project/DronePositioningSystem/ros2_ws/src/drone_localization/drone_localization
 
-비행 후:
+python3 $DPS/plot_accuracy.py      # 정확도 요약 (착륙 시 자동 실행되는 것과 동일)
+python3 $DPS/evaluate_accuracy.py  # 같은 수치를 콘솔로
+python3 $DPS/plot_runs.py          # 여러 비행 비교 (재현성)
+python3 $DPS/plot_spatial.py       # 마커별 실제 vs 측정 위치
+python3 $DPS/analyze_waypoints.py  # 경로점 재추정 → CSV
+python3 $DPS/plot_flight_3d.py     # 3D 전용 뷰 (LiDAR 위치·ROI 밴드 포함)
+python3 $DPS/archive_run.py        # 수동 보관
 
-```bash
-ros2 run drone_localization analyze_waypoints                  # 경로점 재추정 → CSV
-ros2 run drone_localization plot_flight                        # 요약 플롯 + 오차 통계
-ros2 run drone_localization plot_flight_3d --color_by_error    # 3D 전용 뷰
+# 예: 특정 비행만
+python3 $DPS/plot_accuracy.py --output_dir ~/drone_project/flight_logs/run040
 ```
 
 ### RViz2로 보려면
@@ -208,11 +275,13 @@ Fixed Frame을 `map`으로 두고 Add → **By topic** 에서 추가:
 
 | 파일 | 내용 |
 |---|---|
-| `actual_path.csv` | PX4 실제 궤적 (NED→ENU 변환) |
-| `estimated_path.csv` | LiDAR 추정 궤적 |
+| `runNNN/` | **비행별 보관 디렉토리** (착륙 감지 시 자동 생성) |
+| `actual_path.csv` | PX4 실제 궤적 (NED→ENU 변환) — 진행 중인 비행 |
+| `estimated_path.csv` | LiDAR 추정 궤적 — 진행 중인 비행 |
+| `accuracy_summary.png` | 정확도 요약 (착륙 시 자동 생성) |
 | `waypoint_estimates_offline.csv` | **경로점별 재추정 위치 (정본)** |
 | `waypoint_estimates.csv` | 실시간 검출 결과 (참고용, §6.2) |
-| `flight_plot.png`, `flight_plot_3d.png` | 시각화 |
+| `accuracy_runs.png`, `flight_plot_3d.png` | 다중 런 비교 / 3D 뷰 |
 
 ---
 
@@ -234,10 +303,14 @@ base_link가 지면 위 0.24m에 있다:
 | PX4 보고 고도 (호버) | 1.999 m |
 | → base_link 절대고도 (+0.24) | 2.239 m |
 | LiDAR 추정 절대고도 | 2.236 m |
-| **기준면 정렬 후 실제 오차** | **−0.007 m** (std 0.048) |
+| **기준면 정렬 후 실제 오차** | **−0.007 m** |
 
-즉 **측위는 처음부터 정확했고**, 한동안 "Z에 +0.23m 편향이 있다"고 본 것은 기준면을
+즉 **측위는 처음부터 정확했고**, 한동안 "Z에 +0.2m 편향이 있다"고 본 것은 기준면을
 맞추지 않은 비교 때문이었다.
+
+정렬하지 않은 상태의 수치(§1 표의 bias +0.200m)는 이 오프셋이 그대로 들어간 값이다.
+같이 적힌 **std 0.028m가 실제 고도 정밀도**다 — bias는 상수라 빼면 사라지지만 산포는
+못 없앤다. 경로점 median 평균화 덕에 표본 단위 산포(약 0.07m)보다 크게 줄어든 값이다.
 
 **문제는 이 오프셋을 대회에서 알 수 없다는 것이다.** 0.24m는 x500의 값이고 참가팀 기체는
 전부 다르다. 해결 방향 두 가지:
@@ -292,11 +365,38 @@ top-level 워크스페이스에는 센서 위치 반경 0.8m를 무시하는 대
 값이다. OS1-128은 ~0.33°로 4배 이상 조밀해 클러스터 크기·밀도가 다르다. 실비행 로그를 보고
 조정해야 한다.
 
-### 6.6 배치·센서 조합별 반복 검증 미완료
+### 6.6 배치·센서 조합별 비교 미완료
 
-현재 수치는 **OS1-128 / ns 배치 / 1회 비행** 결과다. 설계서(`docs/DESIGN.md`)가 비교한
-4가지 배치(ns/cross/edge/diag) 중 ns와 diag만 실행해봤고, 배치를 실행 인자로 전환하는 기능도
-없다(월드 파일을 따로 만들어 쓴다). 반복 시행·통계 처리도 하지 않았다.
+반복 검증(4회)은 했지만, 설계서(`docs/DESIGN.md`)가 비교한 4가지 배치(ns/cross/edge/diag)
+중 ns와 diag만 실행해봤다. 배치를 실행 인자로 전환하는 기능도 없어 월드 파일을 따로 만들어
+쓴다. 비/안개 등 강건성 시험도 하지 않았다.
+
+### 6.7 (해결됨) ROI 최소 점수 문턱값이 검출을 막고 있었음
+
+기록용. ROI 통과 점이 10개 미만이면 프레임을 통째로 버리는 코드가 있었다. ROI가 z 0~6m로
+넓어 바닥이 수천 점을 공급하던 시절에는 "10점 미만 = 센서가 아무것도 못 봄"이 맞았지만,
+ROI를 호버 고도 밴드(1~3m)로 좁힌 뒤로는 그 안에 드론밖에 없다. 드론이 내놓는 점은 중앙값
+14개, 원거리에서는 3~7개라 **정상 검출이 통째로 버려지고 있었다** — 검출률 37%, 미검출
+사유는 거의 전부 "ROI 통과 <10점"이었다.
+
+문턱값을 `cluster_min_points`에 맞추자 같은 경로에서 검출 프레임이 428 → 1107개로 늘었다.
+이 하나가 당시 관찰되던 여러 증상(호버 중 0.8~0.9m 이상치, 한쪽 센서만 기여하는 것처럼
+보이던 현상, 코스팅 중 오버슛)의 공통 원인이었다.
+
+**교훈**: 파이프라인 앞단의 전제를 바꾸면(ROI 범위), 그 전제에 맞춰 고른 상수(문턱값 10)도
+같이 재검토해야 한다.
+
+### 6.8 X축 평균오차의 원인 미규명
+
+정상 비행 4회에서 X 평균오차가 +0.055m로 Y(−0.012m)보다 일관되게 크다. 두 가설을 세웠으나
+데이터가 모두 반박했다:
+
+- **처리 지연** — 정지 중에도 오차가 그대로 남는다(이동 +0.074 vs 정지 +0.077)
+- **센서 쪽으로 끌림** — 드론이 센서(x=15) 양쪽 어디에 있든 부호가 안 바뀐다
+
+즉 위치·속도와 무관한 고정 오프셋으로 보인다. LiDAR 좌표는 yaml/월드 생성기/배포된 SDF가
+모두 일치함을 확인했으므로 좌표 불일치도 아니다. 크기가 채점 기준의 11%라 급하지 않지만
+원인은 아직 모른다.
 
 ---
 
