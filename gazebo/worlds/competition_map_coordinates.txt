@@ -85,5 +85,5 @@
   id=4  (x=12.8571, y=12.0)  model=aruco_marker_id4_at_x13_y12
 
 === 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용) ===
-  ground_lidar_1  world=(15.0, -1.5, 2.0)  yaw=1.5708 rad  topic=/lidar1/points
-  ground_lidar_2  world=(15.0, 21.5, 2.0)  yaw=-1.5708 rad  topic=/lidar2/points
+  ground_lidar_1  world=(15.0, -1.5, 2.0)  yaw=1.5708 rad  topic=/lidar1/points  OS1-SR (range 0.3~85.0m)
+  ground_lidar_2  world=(15.0, 21.5, 2.0)  yaw=-1.5708 rad  topic=/lidar2/points  OS1 (range 0.1~170.0m)

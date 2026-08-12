@@ -388,7 +388,7 @@
 
     <!-- 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용, 33x23 금지구역 밖) -->
 
-    <!-- 지상 고정 LiDAR(OS1-128): ground_lidar_1 @ world (15.0, -1.5, 2.0), yaw=1.5708 rad, topic /lidar1/points -->
+    <!-- 지상 고정 LiDAR(OS1-SR 128ch): ground_lidar_1 @ world (15.0, -1.5, 2.0), yaw=1.5708 rad, topic /lidar1/points -->
     <model name="ground_lidar_1">
       <static>true</static>
       <pose>15.0 -1.5 2.0 0.0 0.0 1.5708</pose>
@@ -446,8 +446,8 @@
               </vertical>
             </scan>
             <range>
-              <min>0.1</min>
-              <max>170.0</max>
+              <min>0.3</min>
+              <max>85.0</max>
               <resolution>0.001</resolution>
             </range>
             <noise>
@@ -459,7 +459,7 @@
         </sensor>
       </link>
     </model>
-    <!-- 지상 고정 LiDAR(OS1-128): ground_lidar_2 @ world (15.0, 21.5, 2.0), yaw=-1.5708 rad, topic /lidar2/points -->
+    <!-- 지상 고정 LiDAR(OS1 128ch): ground_lidar_2 @ world (15.0, 21.5, 2.0), yaw=-1.5708 rad, topic /lidar2/points -->
     <model name="ground_lidar_2">
       <static>true</static>
       <pose>15.0 21.5 2.0 0.0 0.0 -1.5708</pose>

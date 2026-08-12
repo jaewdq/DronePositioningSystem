@@ -51,10 +51,8 @@ ros2_ws/src/
       analyze_waypoints.py             # [오프라인] 호버 구간 검출 → 경로점 위치 재추정
       evaluate_accuracy.py             # 정확도 수치 (콘솔) — 모든 플롯의 계산 원본
       plot_accuracy.py                 # ★ 정확도 요약 (3D 궤적 + 경로점 수평/수직) — 착륙 시 자동 실행
-      plot_summary.py                  # 간단 요약 (평면 궤적 + X/Y/Z 오차 시계열)
       plot_runs.py                     # 여러 비행 비교 (재현성)
       plot_spatial.py                  # 마커별 실제 위치 vs 측정 위치
-      plot_cluster_shape.py            # 클러스터 형상 vs 기체 제원
       plot_flight.py                   # 계획 vs 실제 vs 추정 (평면+고도+3D 요약)
       plot_flight_3d.py                # 전체 경로 3D 전용 뷰
       compare_fusion.py                # [오프라인] 융합 방식 비교 (밀도가중/동일/역분산)
@@ -76,13 +74,11 @@ gazebo/
     generate_aruco_markers.py
     generate_ground_texture.py         # 잔디+흙 바닥 텍스처 생성기 (고정 시드)
     arena_ground/                      # 생성된 바닥 모델 (grass.png + SDF)
-    ground_lidar_sensor/               # OS1-128 등가 gpu_lidar 센서 모델
     aruco_marker_id*/                  # 마커 모델 4개
 
 docs/
   DESIGN.md                            # 설계서 (센서배치 근거·알고리즘·평가기준)
-  CODE_STRUCTURE.md                    # 파일별 상세 구조
-  TRACKER_VERSION_COMPARISON.md        # 워크스페이스 두 버전 대조
+  KALMAN_FILTER_DESIGN.md              # 칼만필터 적용 구조와 개선안
 ```
 
 > **좌표 동기화 주의**: LiDAR/마커 좌표는 `generate_competition_map*.py`(월드 생성)와

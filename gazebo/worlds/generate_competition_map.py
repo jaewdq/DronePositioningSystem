@@ -88,10 +88,23 @@ markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 #
 # topic은 OS0-SR 버전과 동일하게 /lidar1, /lidar2 (한 번에 하나의 world만 로드되므로
 # 토픽명이 겹쳐도 문제없음 — 어느 쪽을 PX4_GZ_WORLD로 띄우느냐로 결정됨).
+# 센서 변종별 사거리 (Ouster 데이터시트, 10% 반사율 기준이 실효 한계).
+# 수직 FOV·채널·각분해능·정밀도는 두 변종이 동일하므로 배치 계산은 그대로다.
+#   OS1     80% 170m / 10% 90m, 최소거리 0m
+#   OS1-SR  80%  85m / 10% 45m, 최소거리 0.3m
+LIDAR_VARIANTS = {
+    "OS1":    {"min": 0.1, "max": 170.0},
+    "OS1-SR": {"min": 0.3, "max":  85.0},
+}
+
+# 남쪽 센서를 SR로 둔 이유: 마커 4개 중 3개가 필드 남쪽 절반(y=4~12)에 있어
+# 북쪽 센서가 구조적으로 더 먼 거리를 담당한다. 실측(run040) 기준 최대
+# 관측거리가 남 20.6m / 북 26.3m로, 사거리 여유가 적은 SR은 가까운 쪽에
+# 두는 편이 안전하다(10% 반사 45m 대비 여유 2.2배 vs 1.7배).
 LIDARS = [
-    # (name, topic, x, y, z, roll, pitch, yaw)
-    ("ground_lidar_1", "/lidar1", 15.0, -1.5, 2.0, 0.0, 0.0,  1.5708),  # 남쪽, 필드중앙X, 북향
-    ("ground_lidar_2", "/lidar2", 15.0, 21.5, 2.0, 0.0, 0.0, -1.5708),  # 북쪽, 필드중앙X, 남향
+    # (name, topic, x, y, z, roll, pitch, yaw, variant)
+    ("ground_lidar_1", "/lidar1", 15.0, -1.5, 2.0, 0.0, 0.0,  1.5708, "OS1-SR"),  # 남쪽, 필드중앙X, 북향
+    ("ground_lidar_2", "/lidar2", 15.0, 21.5, 2.0, 0.0, 0.0, -1.5708, "OS1"),     # 북쪽, 필드중앙X, 남향
 ]
 
 # GUI에 LiDAR 레이(파란 부채꼴)를 그릴지 여부.
@@ -182,15 +195,17 @@ def lidar_models() -> str:
     """지상 고정 gpu_lidar 2대를 world에 인라인으로 삽입.
 
     각 모델: 지지대 기둥(바닥→센서) + 청색 하우징(OS0-SR의 주황과 구분) + 흰 캡
-    + gpu_lidar 센서. 센서 스펙은 Ouster OS1(Standard Range) 128ch 등가
-    (수평 360°/1024, 수직 ±21.2°/128, range 0.1~170m, 10Hz, gaussian noise 0.5cm).
+    + gpu_lidar 센서. 센서 스펙은 Ouster OS1 128ch 등가 (수평 360°/1024,
+    수직 ±21.2°/128, 10Hz, gaussian noise 0.5cm). 사거리만 변종별로 다르며
+    LIDAR_VARIANTS에서 가져온다.
     """
     parts = []
-    for name, topic, x, y, z, roll, pitch, yaw in LIDARS:
+    for name, topic, x, y, z, roll, pitch, yaw, variant in LIDARS:
+        rng = LIDAR_VARIANTS[variant]
         pole_len = z
         pole_cz = -z / 2.0
         parts.append(f'''
-    <!-- 지상 고정 LiDAR(OS1-128): {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
+    <!-- 지상 고정 LiDAR({variant} 128ch): {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
     <model name="{name}">
       <static>true</static>
       <pose>{x} {y} {z} {roll} {pitch} {yaw}</pose>
@@ -248,8 +263,8 @@ def lidar_models() -> str:
               </vertical>
             </scan>
             <range>
-              <min>0.1</min>
-              <max>170.0</max>
+              <min>{rng['min']}</min>
+              <max>{rng['max']}</max>
               <resolution>0.001</resolution>
             </range>
             <noise>
@@ -453,9 +468,11 @@ with open(out_txt, "w") as f:
         f.write(f"  id={marker_id}  (x={x}, y={y})  model={name}\n")
 
     f.write("\n=== 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용) ===\n")
-    for name, topic, x, y, z, roll, pitch, yaw in LIDARS:
+    for name, topic, x, y, z, roll, pitch, yaw, variant in LIDARS:
+        rng = LIDAR_VARIANTS[variant]
         f.write(f"  {name}  world=({x}, {y}, {z})  yaw={yaw} rad  "
-                f"topic={topic}/points\n")
+                f"topic={topic}/points  {variant} "
+                f"(range {rng['min']}~{rng['max']}m)\n")
 
 print(f"좌표 파일 생성: {out_txt}")
 print("\n완료.")
