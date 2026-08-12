@@ -47,7 +47,12 @@ class OfflineScorer(Node):
         self.declare_parameter('target_time', 180.0)
         self.declare_parameter('maximum_time', 600.0)
 
+        # team 은 출력 폴더의 하위 경로로, team_label 은 result.json 에 적는
+        # 이름으로 쓴다. run_config 를 받으면 둘이 갈라진다 — GUI 가 준
+        # 경로에는 이미 팀 폴더가 포함돼 있어 한 단계를 더 내려가면 안 되기
+        # 때문이다.
         self.team = self.get_parameter('team').value
+        self.team_label = self.team
         self.output_dir = Path(self.get_parameter('output_dir').value)
 
         self.grid_x = self.get_parameter('grid_x').value
@@ -97,7 +102,43 @@ class OfflineScorer(Node):
             20
         )
 
+        # competition_gui 가 팀·런별 폴더를 만들고 그 경로를 run_config 로
+        # 알려준다. 이걸 안 받으면 채점기는 기본 팀명(team_alpha)으로 자기
+        # 경로에 쓰고, GUI 는 자기가 만든 폴더에서 result.json 을 기다리다가
+        # 영원히 멈춘다(실제로 그렇게 걸렸다).
+        self.declare_parameter('config_topic', '/competition/run_config')
+        self.create_subscription(
+            String,
+            self.get_parameter('config_topic').value,
+            self.config_callback,
+            10
+        )
+
         self.get_logger().info('Offline scorer ready for rosbag replay')
+
+    def config_callback(self, msg):
+        """GUI 가 지정한 팀명과 출력 폴더로 갈아탄다."""
+        try:
+            cfg = json.loads(msg.data)
+        except (ValueError, TypeError) as exc:
+            self.get_logger().error(f'Invalid run_config: {exc}')
+            return
+
+        out = cfg.get('output_dir')
+        if out:
+            # GUI 가 준 경로는 이미 팀/런까지 포함한 최종 폴더다. 아래
+            # save() 가 output_dir/team 으로 다시 내려가므로, 그 한 단계를
+            # 상쇄하기 위해 team 을 빈 문자열로 둔다.
+            self.output_dir = Path(out).expanduser()
+            self.team = ''
+        name = str(cfg.get('team_name', '')).strip()
+        team_id = str(cfg.get('team_id', '')).strip()
+        if name:
+            self.team_label = f'{name}_{team_id}' if team_id else name
+
+        self.get_logger().info(
+            f'Run config applied: team={self.team_label}, '
+            f'output={self.output_dir}')
 
     @staticmethod
     def rmse(values):
@@ -272,7 +313,7 @@ class OfflineScorer(Node):
             final = 0.0
 
         result = {
-            'team': self.team,
+            'team': self.team_label,
             'completion_time_s': completion_time,
             'detected_markers': sorted(self.detected),
             'valid_hover_markers': sorted(self.valid_hover),
