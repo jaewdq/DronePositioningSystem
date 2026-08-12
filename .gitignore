@@ -17,3 +17,6 @@ flight_logs/
 .idea/
 *.swp
 .DS_Store
+
+# 대회 채점 산출물 (실행 시 생성)
+competition_results/
