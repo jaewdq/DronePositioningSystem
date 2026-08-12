@@ -20,3 +20,7 @@ flight_logs/
 
 # 대회 채점 산출물 (실행 시 생성)
 competition_results/
+
+# 궤적 생성기 산출물 (generate_groundtruth_trajectory.py 가 만듦)
+groundtruth_trajectory.csv
+groundtruth_trajectory_preview.png

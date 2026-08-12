@@ -19,7 +19,6 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'waypoint_land = drone_mission.waypoint_land:main',
             'generate_groundtruth_trajectory = drone_mission.generate_groundtruth_trajectory:main',
             'ground_truth_path_publisher = drone_mission.ground_truth_path_publisher:main',
             'competition_mission = drone_mission.competition_mission:main',

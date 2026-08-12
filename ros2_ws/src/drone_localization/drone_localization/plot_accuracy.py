@@ -64,6 +64,26 @@ AREA_X, AREA_Y = 30.0, 20.0
 N_CELLS_X, N_CELLS_Y = 7, 5
 
 
+def _fix_mpl_toolkits():
+    """낡은 시스템 mpl_toolkits가 새 matplotlib을 가로채는 문제를 교정.
+
+    이 PC에는 pip(~/.local)의 matplotlib 3.10과 apt(/usr/lib)의 3.5.1이
+    함께 있는데, dist-packages의 matplotlib-3.5.1-nspkg.pth가 mpl_toolkits를
+    네임스페이스 패키지로 선점해서 3.5.1쪽이 로드된다. 그 버전은 이미
+    삭제된 matplotlib.docstring을 import하려다 깨지므로 Axes3D를 못 쓴다.
+    matplotlib과 같은 디렉토리에 있는(=버전이 맞는) mpl_toolkits를
+    __path__ 앞에 끼워넣어 그쪽이 먼저 잡히게 한다."""
+    try:
+        import matplotlib
+        import mpl_toolkits
+        sibling = os.path.join(
+            os.path.dirname(os.path.dirname(matplotlib.__file__)), 'mpl_toolkits')
+        if os.path.isdir(sibling) and sibling not in mpl_toolkits.__path__:
+            mpl_toolkits.__path__.insert(0, sibling)
+    except Exception:
+        pass  # 교정 실패해도 아래 import에서 정상 여부가 다시 판정된다
+
+
 def _setup_font():
     import matplotlib
     for name in ('Noto Sans CJK JP', 'Noto Sans CJK KR', 'NanumGothic',
@@ -284,9 +304,7 @@ def main():
         return
 
     _setup_font()
-    # 이 PC에는 apt/pip matplotlib이 섞여 있어 mpl_toolkits가 옛 버전으로
-    # 잡히면 Axes3D import가 깨진다. plot_flight_3d가 쓰는 교정을 그대로 사용.
-    from drone_localization.plot_flight_3d import _fix_mpl_toolkits
+    # apt/pip matplotlib이 섞여 있으면 Axes3D import가 깨진다(위 함수 참고).
     _fix_mpl_toolkits()
     import matplotlib
     if args.save_only:

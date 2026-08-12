@@ -35,8 +35,6 @@ setup(
             'plot_accuracy = drone_localization.plot_accuracy:main',
             'compare_fusion = drone_localization.compare_fusion:main',
             'archive_run = drone_localization.archive_run:main',
-            'plot_runs = drone_localization.plot_runs:main',
-            'plot_spatial = drone_localization.plot_spatial:main',
         ],
     },
 )

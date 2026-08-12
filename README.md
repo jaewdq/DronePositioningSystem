@@ -51,8 +51,6 @@ ros2_ws/src/
       analyze_waypoints.py             # [오프라인] 호버 구간 검출 → 경로점 위치 재추정
       evaluate_accuracy.py             # 정확도 수치 (콘솔) — 모든 플롯의 계산 원본
       plot_accuracy.py                 # ★ 정확도 요약 (3D 궤적 + 경로점 수평/수직) — 착륙 시 자동 실행
-      plot_runs.py                     # 여러 비행 비교 (재현성)
-      plot_spatial.py                  # 마커별 실제 위치 vs 측정 위치
       plot_flight.py                   # 계획 vs 실제 vs 추정 (평면+고도+3D 요약)
       plot_flight_3d.py                # 전체 경로 3D 전용 뷰
       compare_fusion.py                # [오프라인] 융합 방식 비교 (밀도가중/동일/역분산)
@@ -62,8 +60,7 @@ ros2_ws/src/
     drone_mission/
       competition_mission.py           # PX4 offboard 궤적 재생
       generate_groundtruth_trajectory.py
-      ground_truth_path_publisher.py
-      waypoint_land.py
+      ground_truth_path_publisher.py   # RViz2에 계획 경로 표시 (선택)
 
 gazebo/
   worlds/
@@ -110,7 +107,7 @@ docs/
                                     ┌─────────────────────┴────────────┐
                                     ▼                                  ▼
                           analyze_waypoints              plot_accuracy (착륙 시 자동)
-                    (호버 구간 → 경로점 위치 재추정)      evaluate_accuracy / plot_runs
+                    (호버 구간 → 경로점 위치 재추정)      evaluate_accuracy (콘솔 수치)
 ```
 
 ### 두 LiDAR를 합치는 방식
@@ -231,8 +228,6 @@ DPS=~/drone_project/DronePositioningSystem/ros2_ws/src/drone_localization/drone_
 
 python3 $DPS/plot_accuracy.py      # 정확도 요약 (착륙 시 자동 실행되는 것과 동일)
 python3 $DPS/evaluate_accuracy.py  # 같은 수치를 콘솔로
-python3 $DPS/plot_runs.py          # 여러 비행 비교 (재현성)
-python3 $DPS/plot_spatial.py       # 마커별 실제 vs 측정 위치
 python3 $DPS/analyze_waypoints.py  # 경로점 재추정 → CSV
 python3 $DPS/plot_flight_3d.py     # 3D 전용 뷰 (LiDAR 위치·ROI 밴드 포함)
 python3 $DPS/archive_run.py        # 수동 보관
