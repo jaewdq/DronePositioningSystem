@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# 실내 경로 5종 × N회 시뮬: 실기 배치(LIDAR_LAYOUT=real)에서 비행 → PF/MF/SU 재생(측정 시각 기준) → 평가
+# 실내 경로 5종 × N회 시뮬: 실기 배치(LIDAR_LAYOUT=real)에서 비행 → PF/MF/SU 재생 → 평가
 #
 # 사용:  shapes_replicate.sh [단계...]     (기본: record replay eval)
-#   환경변수: ROOT(기본 ~/drone_project/flight_logs/indoor/shapes), N(기본 3), SHAPES, MODEL(기본 x500_cf2x2)
+#   환경변수: ROOT(기본 ~/drone_project/flight_logs/indoor/shapes), N(기본 3), SHAPES, MODEL(기본 x500_cf2x2),
+#             CLOCK(기본 arrival = 수신 시각, 라이브·실기와 같음 | stamp = 센서 측정 시각)
 #   QGroundControl 이 켜져 있어야 한다 (record 단계).
 #
-# 재생은 --clock stamp 다. Gazebo 는 센서를 순서대로 처리해 같은 시각의 두 스캔이 수십 ms 차이로
-# 도착하는데, 실기는 같은 시각에 도착한다. ROI 는 실기와 같은 4 x 3 m 시험 필드로 덮어쓴다.
+# 재생 시계: arrival 은 bag 수신 시각(라이브와 같다), stamp 는 센서 측정 시각. Gazebo 는 센서를 순서대로
+# 처리해 같은 시각의 두 스캔이 수십 ms 차이로 도착한다 (실기는 위상 고정이라 같은 시각에 도착).
+# record 는 재생 비교를 위해 항상 bag 을 녹화한다 (비행 1회 2~3 GB). ROI 는 실기와 같은 4 x 3 m.
 set -eo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 DPS=$HOME/drone_project/DronePositioningSystem
@@ -16,6 +18,7 @@ SHAPES=${SHAPES:-helix circle figure8 square backforth}
 MODEL=${MODEL:-x500_cf2x2}
 PARAMS=$DPS/ros2_ws/src/drone_localization/params/lidar_localization_indoor.yaml
 ROI=(-p roi_x_min:=-0.5 -p roi_x_max:=3.5 -p roi_y_min:=-0.5 -p roi_y_max:=2.5 -p roi_z_min:=0.10 -p roi_z_max:=2.5)
+CLOCK=${CLOCK:-arrival}
 STAGES=${*:-record replay eval}
 
 record() {
@@ -55,7 +58,7 @@ PY
     [ -f "$out/state_details.csv" ] && return 0
     rm -rf "$out"; mkdir -p "$out"
     echo "재생 $f $M"
-    python3 -m drone_localization.replay_bag --bag "$F/bag" --out "$out" --tracker cov --clock stamp \
+    python3 -m drone_localization.replay_bag --bag "$F/bag" --out "$out" --tracker cov --clock "$CLOCK" \
         --ground-truth-topic "/world/$world/dynamic_pose/info" --require-ground-truth --quiet \
         --ros-args --params-file "$PARAMS" "${L[@]}" "${ROI[@]}" "${X[@]}" >"$out/replay.log" 2>&1
 }

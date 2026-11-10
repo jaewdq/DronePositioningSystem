@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # 실내 케이지 라이브 비행 한 번 — 보면서 날리고, 끝나면 경로 그림이 자동으로 뜬다.
 #
-#   PX4+Gazebo(화면) → 통신 에이전트 → 트래커(실기와 같은 launch+yaml) → 참값 브리지
-#   → 경로 표시(path_viz) → RViz → bag 녹화 → indoor_survey_mission 비행
-#   → 끝나면: 경로 그림(path_result.png) 열기 → PF/MF/SU 재생 비교(fusion_compare.png) 열기
+#   PX4+Gazebo(화면) → 통신 에이전트 → 트래커(launch+실내 yaml) → 참값 브리지
+#   → 경로 표시(path_viz) → RViz → [RECORD_BAG=1 이면 bag 녹화] → 비행 미션
+#   → 끝나면: 경로 그림(path_result.png) 열기 → [bag 이 있으면 PF/MF/SU 재생 비교(fusion_compare.png)]
 #   → Enter 를 누르면 시뮬레이션까지 모두 정리
 #
 # 사용:  live_flight.sh [이름]        (기본 이름 run_월일_시분)
-#   결과: ~/drone_project/flight_logs/indoor/live/<이름>/
-#   환경변수: MODEL(기본 x500_cf2x2), WORLD(기본 indoor_cage), NO_COMPARE=1(재생 비교 생략)
+#   결과: ~/drone_project/flight_logs/indoor/live/<이름>/  (true_path.csv, estimated_path.csv, path_result.png, 로그)
+#   환경변수: MODEL(기본 x500_cf2x2), WORLD(기본 indoor_cage), MISSION(기본 indoor_survey_mission,
+#             예: "indoor_shapes_mission helix"), RECORD_BAG=1(원본 점군 녹화 + 재생 비교, 1분에 2~3 GB),
+#             NO_COMPARE=1(녹화는 하되 재생 비교 생략)
 #   QGroundControl이 켜져 있어야 시동이 걸린다.
 set -eo pipefail
 
@@ -74,15 +76,18 @@ start "$OUT/gt_bridge.log" ros2 run ros_gz_bridge parameter_bridge \
 start "$OUT/path_viz.log" python3 "$HERE/path_viz.py" --world "$WORLD" --save "$OUT"
 VIZ=$LAST
 start "$OUT/rviz.log" rviz2 -d "$HERE/indoor.rviz"
-start "$OUT/bag.log" ros2 bag record -o "$OUT/bag" \
-    /lidar1/points /lidar2/points "/world/$WORLD/dynamic_pose/info" /fmu/out/vehicle_local_position_v1
-BAG=$LAST
-echo "RViz·녹화 준비 대기..."
+BAG=
+if [ -n "${RECORD_BAG:-}" ]; then
+    start "$OUT/bag.log" ros2 bag record -o "$OUT/bag" \
+        /lidar1/points /lidar2/points "/world/$WORLD/dynamic_pose/info" /fmu/out/vehicle_local_position_v1
+    BAG=$LAST
+fi
+echo "RViz${BAG:+·녹화} 준비 대기..."
 sleep 10
 
 # 3) 비행 (착륙·disarm 하면 스스로 끝남)
 echo "비행 시작 — Gazebo·RViz 창에서 보세요"
-if timeout 180 ros2 run drone_mission indoor_survey_mission >"$OUT/mission.log" 2>&1; then
+if timeout 180 ros2 run drone_mission ${MISSION:-indoor_survey_mission} >"$OUT/mission.log" 2>&1; then
     echo "비행 완료"
 else
     echo "비행이 180초 안에 끝나지 않음 — $OUT/mission.log 확인" >&2
@@ -90,7 +95,7 @@ fi
 sleep 2
 
 # 4) 녹화·경로 저장 → 경로 그림 열기
-stop_group "$BAG"
+[ -n "$BAG" ] && stop_group "$BAG"
 stop_group "$VIZ"
 grep -E "저장|건너뜀" "$OUT/path_viz.log" || true
 [ -f "$OUT/path_result.png" ] && xdg-open "$OUT/path_result.png" >/dev/null 2>&1 &
