@@ -32,7 +32,7 @@ from px4_msgs.msg import (
     VehicleStatus,
 )
 
-from drone_mission.generate_groundtruth_trajectory import build_primitives, sample_trajectory, DT
+from drone_mission.generate_groundtruth_trajectory import build_layout_primitives, sample_trajectory, DT
 
 
 def world_to_ned(x: float, y: float, z: float, yaw: float):
@@ -73,10 +73,13 @@ class CompetitionMission(Node):
         # ground-truth와 동일한 경로 생성. 마지막 착륙 프리미티브는 빼고
         # PX4 자체 NAV_LAND 명령으로 착륙시킨다 (offboard로 직접 z=0까지
         # 밀어붙이는 것보다 지면 접촉/disarm 처리가 안전함).
-        prims = build_primitives()[:-1]
+        # layout: 마커 배치 번호(generate_groundtruth_trajectory.LAYOUTS). 비행마다 바꾼다.
+        self.layout = self.declare_parameter('layout', 1).value
+        prims = build_layout_primitives(self.layout)[:-1]
         world_samples = sample_trajectory(prims, DT)
         self.setpoints = [world_to_ned(s.x, s.y, s.z, s.yaw) for s in world_samples]
-        self.get_logger().info(f'재생할 setpoint {len(self.setpoints)}개 생성 (NED 변환 완료)')
+        self.get_logger().info(
+            f'배치 {self.layout}: 재생할 setpoint {len(self.setpoints)}개 생성 (NED 변환 완료)')
 
         self.tick = 0
         self.last_arm_attempt_tick = None

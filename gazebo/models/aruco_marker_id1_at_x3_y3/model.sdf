@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <sdf version="1.9">
-  <model name="aruco_marker_id1_at_x4_y4">
+  <model name="aruco_marker_id1_at_x3_y3">
     <static>true</static>
     <pose>0 0 0.001 0 0 0</pose>
     <link name="base">
@@ -16,7 +16,7 @@
           <specular>0.2 0.2 0.2 1</specular>
           <pbr>
             <metal>
-              <albedo_map>model://aruco_marker_id1_at_x4_y4/marker.png</albedo_map>
+              <albedo_map>model://aruco_marker_id1_at_x3_y3/marker.png</albedo_map>
             </metal>
           </pbr>
         </material>

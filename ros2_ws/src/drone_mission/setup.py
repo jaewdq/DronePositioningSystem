@@ -22,6 +22,8 @@ setup(
             'generate_groundtruth_trajectory = drone_mission.generate_groundtruth_trajectory:main',
             'ground_truth_path_publisher = drone_mission.ground_truth_path_publisher:main',
             'competition_mission = drone_mission.competition_mission:main',
+            'indoor_survey_mission = drone_mission.indoor_survey_mission:main',
+            'indoor_shapes_mission = drone_mission.indoor_shapes_mission:main',
         ],
     },
 )

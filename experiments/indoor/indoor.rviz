@@ -1,0 +1,109 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Help Height: 0
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid (1 m)
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 8
+      Offset: {X: 1.5, Y: 1, Z: 0}
+      Color: 110; 110; 110
+    - Class: rviz_default_plugins/MarkerArray
+      Name: 필드·케이지·LiDAR
+      Enabled: true
+      Topic:
+        Value: /viz/cage
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Path
+      Name: 계획 경로 (회색)
+      Enabled: true
+      Color: 160; 160; 160
+      Alpha: 0.6
+      Line Style: Lines
+      Topic:
+        Value: /viz/planned_path
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Path
+      Name: 실제 경로 - 참값 (초록)
+      Enabled: true
+      Color: 60; 220; 90
+      Alpha: 1
+      Line Style: Billboards
+      Line Width: 0.02
+      Topic:
+        Value: /viz/true_path
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/Path
+      Name: 추정 경로 - LiDAR SU (주황)
+      Enabled: true
+      Color: 255; 140; 0
+      Alpha: 1
+      Line Style: Billboards
+      Line Width: 0.015
+      Topic:
+        Value: /viz/estimated_path
+        Reliability Policy: Reliable
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: 현재 추정 위치
+      Enabled: true
+      Topic:
+        Value: /drone/estimated_pose
+        Reliability Policy: Reliable
+      Shape: Arrow
+      Covariance:
+        Position:
+          Value: true
+          Scale: 3
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR1 ROI 점 (드론 후보)
+      Enabled: true
+      Topic:
+        Value: /lidar1/filtered_points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 80; 160; 255
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR2 ROI 점 (드론 후보)
+      Enabled: true
+      Topic:
+        Value: /lidar2/filtered_points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: FlatColor
+      Color: 255; 80; 200
+    - Class: rviz_default_plugins/PointCloud2
+      Name: LiDAR 전체 점군 (끄면 가벼움)
+      Enabled: false
+      Topic:
+        Value: /lidar1/points
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 1
+      Color Transformer: AxisColor
+  Views:
+    # 위에서 똑바로 내려다보는 직교 시점 — 비스듬한 원근 시점에서는 고도 1 m의 경로와
+    # 바닥의 케이지 테두리가 어긋나 보인다. 3D로 보려면 Views 패널에서 Orbit 으로 바꾼다.
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      X: 1.5
+      Y: 1
+      Angle: 0
+      Scale: 140
+Window Geometry:
+  Width: 1400
+  Height: 900

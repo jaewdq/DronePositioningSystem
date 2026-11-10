@@ -3,20 +3,21 @@
   <world name="competition_map">
     <!--
       격자 교차점 전체 좌표 (X x Y, m), 원점(0,0)=이착륙 지점:
-        x=0.0: (0.0,0.0), (0.0,4.0), (0.0,8.0), (0.0,12.0), (0.0,16.0), (0.0,20.0)
-        x=4.2857: (4.2857,0.0), (4.2857,4.0), (4.2857,8.0), (4.2857,12.0), (4.2857,16.0), (4.2857,20.0)
-        x=8.5714: (8.5714,0.0), (8.5714,4.0), (8.5714,8.0), (8.5714,12.0), (8.5714,16.0), (8.5714,20.0)
-        x=12.8571: (12.8571,0.0), (12.8571,4.0), (12.8571,8.0), (12.8571,12.0), (12.8571,16.0), (12.8571,20.0)
-        x=17.1429: (17.1429,0.0), (17.1429,4.0), (17.1429,8.0), (17.1429,12.0), (17.1429,16.0), (17.1429,20.0)
-        x=21.4286: (21.4286,0.0), (21.4286,4.0), (21.4286,8.0), (21.4286,12.0), (21.4286,16.0), (21.4286,20.0)
-        x=25.7143: (25.7143,0.0), (25.7143,4.0), (25.7143,8.0), (25.7143,12.0), (25.7143,16.0), (25.7143,20.0)
-        x=30.0: (30.0,0.0), (30.0,4.0), (30.0,8.0), (30.0,12.0), (30.0,16.0), (30.0,20.0)
+        x=0.0: (0.0,0.0), (0.0,3.0), (0.0,6.0), (0.0,9.0), (0.0,12.0), (0.0,15.0)
+        x=3.0: (3.0,0.0), (3.0,3.0), (3.0,6.0), (3.0,9.0), (3.0,12.0), (3.0,15.0)
+        x=6.0: (6.0,0.0), (6.0,3.0), (6.0,6.0), (6.0,9.0), (6.0,12.0), (6.0,15.0)
+        x=9.0: (9.0,0.0), (9.0,3.0), (9.0,6.0), (9.0,9.0), (9.0,12.0), (9.0,15.0)
+        x=12.0: (12.0,0.0), (12.0,3.0), (12.0,6.0), (12.0,9.0), (12.0,12.0), (12.0,15.0)
+        x=15.0: (15.0,0.0), (15.0,3.0), (15.0,6.0), (15.0,9.0), (15.0,12.0), (15.0,15.0)
+        x=18.0: (18.0,0.0), (18.0,3.0), (18.0,6.0), (18.0,9.0), (18.0,12.0), (18.0,15.0)
+        x=21.0: (21.0,0.0), (21.0,3.0), (21.0,6.0), (21.0,9.0), (21.0,12.0), (21.0,15.0)
+        x=24.0: (24.0,0.0), (24.0,3.0), (24.0,6.0), (24.0,9.0), (24.0,12.0), (24.0,15.0)
 
       마커(경로점) 배치 좌표:
-        id=1: (4.2857, 4.0)
-        id=2: (4.2857, 16.0)
-        id=3: (25.7143, 4.0)
-        id=4: (12.8571, 12.0)
+        id=1: (3.0, 3.0)
+        id=2: (3.0, 12.0)
+        id=3: (21.0, 3.0)
+        id=4: (9.0, 9.0)
     -->
 
     <physics type="ode">
@@ -96,7 +97,7 @@
     <include>
       <uri>model://arena_ground</uri>
       <name>arena_ground</name>
-      <pose>15.0 10.0 0.0 0 0 0</pose>
+      <pose>12.0 7.5 0.0 0 0 0</pose>
     </include>
 
     <!-- 이착륙 지점(원점, world 좌표 0,0) 표시 패드.
@@ -118,15 +119,15 @@
       </link>
     </model>
 
-    <!-- 격자 구획선: 폭 0.1m, X 7칸 x 4.2857m, Y 5칸 x 4.0000m -->
+    <!-- 격자 구획선: 폭 0.1m, X 8칸 x 3.0000m, Y 5칸 x 3.0000m -->
 
     <model name="gridline_v_1">
       <static>true</static>
-      <pose>0.0 10.0 0.003 0 0 0</pose>
+      <pose>0.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -139,11 +140,11 @@
     </model>
     <model name="gridline_v_2">
       <static>true</static>
-      <pose>4.2857 10.0 0.003 0 0 0</pose>
+      <pose>3.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -156,11 +157,11 @@
     </model>
     <model name="gridline_v_3">
       <static>true</static>
-      <pose>8.5714 10.0 0.003 0 0 0</pose>
+      <pose>6.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -173,11 +174,11 @@
     </model>
     <model name="gridline_v_4">
       <static>true</static>
-      <pose>12.8571 10.0 0.003 0 0 0</pose>
+      <pose>9.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -190,11 +191,11 @@
     </model>
     <model name="gridline_v_5">
       <static>true</static>
-      <pose>17.1429 10.0 0.003 0 0 0</pose>
+      <pose>12.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -207,11 +208,11 @@
     </model>
     <model name="gridline_v_6">
       <static>true</static>
-      <pose>21.4286 10.0 0.003 0 0 0</pose>
+      <pose>15.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -224,11 +225,11 @@
     </model>
     <model name="gridline_v_7">
       <static>true</static>
-      <pose>25.7143 10.0 0.003 0 0 0</pose>
+      <pose>18.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -241,11 +242,11 @@
     </model>
     <model name="gridline_v_8">
       <static>true</static>
-      <pose>30.0 10.0 0.003 0 0 0</pose>
+      <pose>21.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>0.1 20.0 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -256,13 +257,13 @@
         </visual>
       </link>
     </model>
-    <model name="gridline_h_9">
+    <model name="gridline_v_9">
       <static>true</static>
-      <pose>15.0 0.0 0.003 0 0 0</pose>
+      <pose>24.0 7.5 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>0.1 15.0 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -275,11 +276,11 @@
     </model>
     <model name="gridline_h_10">
       <static>true</static>
-      <pose>15.0 4.0 0.003 0 0 0</pose>
+      <pose>12.0 0.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>24.0 0.1 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -292,11 +293,11 @@
     </model>
     <model name="gridline_h_11">
       <static>true</static>
-      <pose>15.0 8.0 0.003 0 0 0</pose>
+      <pose>12.0 3.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>24.0 0.1 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -309,11 +310,11 @@
     </model>
     <model name="gridline_h_12">
       <static>true</static>
-      <pose>15.0 12.0 0.003 0 0 0</pose>
+      <pose>12.0 6.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>24.0 0.1 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -326,11 +327,11 @@
     </model>
     <model name="gridline_h_13">
       <static>true</static>
-      <pose>15.0 16.0 0.003 0 0 0</pose>
+      <pose>12.0 9.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>24.0 0.1 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -343,11 +344,28 @@
     </model>
     <model name="gridline_h_14">
       <static>true</static>
-      <pose>15.0 20.0 0.003 0 0 0</pose>
+      <pose>12.0 12.0 0.003 0 0 0</pose>
       <link name="link">
         <visual name="visual">
           <geometry>
-            <box><size>30.0 0.1 0.002</size></box>
+            <box><size>24.0 0.1 0.002</size></box>
+          </geometry>
+          <material>
+            <ambient>0.92 0.92 0.92 1</ambient>
+            <diffuse>1.0 1.0 1.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+            <emissive>0.25 0.25 0.25 1</emissive>
+          </material>
+        </visual>
+      </link>
+    </model>
+    <model name="gridline_h_15">
+      <static>true</static>
+      <pose>12.0 15.0 0.003 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry>
+            <box><size>24.0 0.1 0.002</size></box>
           </geometry>
           <material>
             <ambient>0.92 0.92 0.92 1</ambient>
@@ -361,37 +379,37 @@
 
     <!-- 경로점 ArUco 마커 4개 (DICT_4X4_50, 0.5m x 0.5m), 경계에서 1셀 이상 안쪽 -->
 
-    <!-- 경로점 id=1: (4.2857, 4.0) -->
+    <!-- 경로점 id=1: (3.0, 3.0) -->
     <include>
-      <uri>model://aruco_marker_id1_at_x4_y4</uri>
-      <name>aruco_marker_id1_at_x4_y4</name>
-      <pose>4.2857 4.0 0.005 0 0 0</pose>
+      <uri>model://aruco_marker_id1_at_x3_y3</uri>
+      <name>aruco_marker_id1_at_x3_y3</name>
+      <pose>3.0 3.0 0.005 0 0 0</pose>
     </include>
-    <!-- 경로점 id=2: (4.2857, 16.0) -->
+    <!-- 경로점 id=2: (3.0, 12.0) -->
     <include>
-      <uri>model://aruco_marker_id2_at_x4_y16</uri>
-      <name>aruco_marker_id2_at_x4_y16</name>
-      <pose>4.2857 16.0 0.005 0 0 0</pose>
+      <uri>model://aruco_marker_id2_at_x3_y12</uri>
+      <name>aruco_marker_id2_at_x3_y12</name>
+      <pose>3.0 12.0 0.005 0 0 0</pose>
     </include>
-    <!-- 경로점 id=3: (25.7143, 4.0) -->
+    <!-- 경로점 id=3: (21.0, 3.0) -->
     <include>
-      <uri>model://aruco_marker_id3_at_x26_y4</uri>
-      <name>aruco_marker_id3_at_x26_y4</name>
-      <pose>25.7143 4.0 0.005 0 0 0</pose>
+      <uri>model://aruco_marker_id3_at_x21_y3</uri>
+      <name>aruco_marker_id3_at_x21_y3</name>
+      <pose>21.0 3.0 0.005 0 0 0</pose>
     </include>
-    <!-- 경로점 id=4: (12.8571, 12.0) -->
+    <!-- 경로점 id=4: (9.0, 9.0) -->
     <include>
-      <uri>model://aruco_marker_id4_at_x13_y12</uri>
-      <name>aruco_marker_id4_at_x13_y12</name>
-      <pose>12.8571 12.0 0.005 0 0 0</pose>
+      <uri>model://aruco_marker_id4_at_x9_y9</uri>
+      <name>aruco_marker_id4_at_x9_y9</name>
+      <pose>9.0 9.0 0.005 0 0 0</pose>
     </include>
 
     <!-- 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용, 33x23 금지구역 밖) -->
 
-    <!-- 지상 고정 LiDAR(OS1-SR 128ch): ground_lidar_1 @ world (15.0, -1.5, 2.0), yaw=1.5708 rad, topic /lidar1/points -->
+    <!-- 지상 고정 LiDAR(OS1-SR 128ch): ground_lidar_1 @ world (12.0, -2.0, 2.0), yaw=1.5708 rad, topic /lidar1/points -->
     <model name="ground_lidar_1">
       <static>true</static>
-      <pose>15.0 -1.5 2.0 0.0 0.0 1.5708</pose>
+      <pose>12.0 -2.0 2.0 0.0 0.0 1.5708</pose>
       <link name="base">
         <visual name="pole">
           <pose>0 0 -1.0 0 0 0</pose>
@@ -429,7 +447,7 @@
           <update_rate>10</update_rate>
           <topic>/lidar1</topic>
           <gz_frame_id>ground_lidar_1_frame</gz_frame_id>
-          <visualize>true</visualize>
+          <visualize>false</visualize>
           <lidar>
             <scan>
               <horizontal>
@@ -459,10 +477,10 @@
         </sensor>
       </link>
     </model>
-    <!-- 지상 고정 LiDAR(OS1 128ch): ground_lidar_2 @ world (15.0, 21.5, 2.0), yaw=-1.5708 rad, topic /lidar2/points -->
+    <!-- 지상 고정 LiDAR(OS1 128ch): ground_lidar_2 @ world (12.0, 17.0, 2.0), yaw=-1.5708 rad, topic /lidar2/points -->
     <model name="ground_lidar_2">
       <static>true</static>
-      <pose>15.0 21.5 2.0 0.0 0.0 -1.5708</pose>
+      <pose>12.0 17.0 2.0 0.0 0.0 -1.5708</pose>
       <link name="base">
         <visual name="pole">
           <pose>0 0 -1.0 0 0 0</pose>
@@ -500,7 +518,7 @@
           <update_rate>10</update_rate>
           <topic>/lidar2</topic>
           <gz_frame_id>ground_lidar_2_frame</gz_frame_id>
-          <visualize>true</visualize>
+          <visualize>false</visualize>
           <lidar>
             <scan>
               <horizontal>

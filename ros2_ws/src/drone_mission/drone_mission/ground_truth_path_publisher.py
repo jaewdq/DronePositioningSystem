@@ -33,7 +33,7 @@ from std_msgs.msg import ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 
 from drone_mission.generate_groundtruth_trajectory import (
-    generate_trajectory, MARKERS, HOME, ALTITUDE,
+    generate_trajectory, LAYOUTS, HOME, ALTITUDE,
 )
 
 FRAME_ID = "map"
@@ -59,7 +59,9 @@ class GroundTruthPathPublisher(Node):
         self.marker_pub = self.create_publisher(MarkerArray, '/ground_truth_markers', latched_qos)
 
         self.get_logger().info('ground-truth 궤적 생성 중...')
-        self.samples = generate_trajectory()
+        self.layout = self.declare_parameter('layout', 1).value
+        self.markers = LAYOUTS[self.layout]
+        self.samples = generate_trajectory(layout=self.layout)
         self.get_logger().info(f'{len(self.samples)}개 샘플 생성 완료, 발행 시작')
 
         self.publish_path()
@@ -97,7 +99,7 @@ class GroundTruthPathPublisher(Node):
         arr = MarkerArray()
         mid = 0
 
-        for marker_id, (mx, my) in MARKERS.items():
+        for marker_id, (mx, my) in self.markers.items():
             m = Marker()
             m.header.frame_id = FRAME_ID
             m.header.stamp = self._stamp()

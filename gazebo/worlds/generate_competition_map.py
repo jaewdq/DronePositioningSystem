@@ -30,8 +30,15 @@ from generate_ground_texture import generate_ground_model  # noqa: E402
 # ---------------------------------------------------------------------------
 # 맵 사양 (대회 규정집 기준) — generate_competition_map.py와 완전히 동일
 # ---------------------------------------------------------------------------
-AREA_X = 30.0
-AREA_Y = 20.0
+# 지침서 v03 §3: 경기장 24m × 15m, safety area 32m × 23m.
+# 이전 판(30×20)에서 줄어들었다. 경기장이 작아지면 최대 관측거리가 26.3m →
+# 20.4m로 줄고, 점 개수는 거리²에 반비례하므로 표적당 점이 약 1.7배 늘어난다.
+# 센서 한 대가 얻는 점이 중앙값 6개(24%는 2~3개)뿐이던 문제가 그만큼 완화된다.
+AREA_X = 24.0
+AREA_Y = 15.0
+# safety area — 이탈하면 미션 중단(최종 0점)이므로 채점·ROI 판단의 바깥 경계다.
+SAFETY_X = 32.0
+SAFETY_Y = 23.0
 LINE_WIDTH = 0.10       # 구획선 폭 10cm (규정)
 
 # 바닥 적층 순서 (z-fighting 방지). 아래에서 위로:
@@ -44,7 +51,9 @@ LINE_THICKNESS = 0.002
 LINE_Z = GRASS_TOP_Z + LINE_THICKNESS   # 구획선 중심 높이 → 상단 0.005
 MARKER_Z = LINE_Z + 0.002               # 마커는 구획선 위
 
-N_CELLS_X = 7
+# 격자 한 칸 3m × 3m → 24/3 = 8칸, 15/3 = 5칸. 이전 판은 30/7 = 4.286m라
+# 격자 좌표가 소수였는데, 3m로 떨어지면서 격자선이 전부 정수가 된다.
+N_CELLS_X = 8
 N_CELLS_Y = 5
 CELL_X = AREA_X / N_CELLS_X
 CELL_Y = AREA_Y / N_CELLS_Y
@@ -57,11 +66,14 @@ interior_x = x_positions[1:-1]
 interior_y = y_positions[1:-1]
 interior_intersections = [(x, y) for x in interior_x for y in interior_y]
 
+# 24×15 격자 교점. 이전 판(30×20)의 배치 비율을 그대로 옮기고 3m 격자에
+# 맞춰 정수로 떨어뜨렸다 — 남서/북서/남동에 셋, 중앙에 하나.
+#   (4.2857,4)→(3,3)  (4.2857,16)→(3,12)  (25.7143,4)→(21,3)  (12.8571,12)→(9,9)
 marker_coords = [
-    (4.2857, 4.0),    # id1
-    (4.2857, 16.0),   # id2
-    (25.7143, 4.0),   # id3
-    (12.8571, 12.0),  # id4
+    (3.0, 3.0),     # id1
+    (3.0, 12.0),    # id2
+    (21.0, 3.0),    # id3
+    (9.0, 9.0),     # id4
 ]
 markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 
@@ -95,16 +107,29 @@ markers = [(i, x, y) for i, (x, y) in enumerate(marker_coords, start=1)]
 LIDAR_VARIANTS = {
     "OS1":    {"min": 0.1, "max": 170.0},
     "OS1-SR": {"min": 0.3, "max":  85.0},
+    # OS0 64ch (Ouster 데이터시트): 80% 35m / 10% 15m, 최소거리 0.3m, 정확도 ±0.8cm.
+    # gpu_lidar엔 반사율 모델이 없어 max에서 딱 끊기므로 80% 기준 35m로 녹화하고,
+    # 어두운 기체(10%, 15m) 조건은 재생 때 거리 필터로 만든다(녹화는 한 번).
+    "OS0":    {"min": 0.3, "max":  35.0},
 }
+
+# 두 센서를 다른 주기로 돌려 위상을 드리프트시키는 실험은 되돌렸다 —
+# "주기가 바뀌면 의미가 없다"(같은 10Hz에서 위상만 봐야 한다). 고정
+# 위상차 실험은 generate_delayed_lidar.py + spawn_delayed_lidar.py로
+# 대신한다: lidar2를 이 월드에서 완전히 빼고 별도 모델로 뽑은 뒤,
+# 시뮬레이션이 돈 뒤 정해진 시각에 스폰해 위상을 고정한다.
 
 # 남쪽 센서를 SR로 둔 이유: 마커 4개 중 3개가 필드 남쪽 절반(y=4~12)에 있어
 # 북쪽 센서가 구조적으로 더 먼 거리를 담당한다. 실측(run040) 기준 최대
 # 관측거리가 남 20.6m / 북 26.3m로, 사거리 여유가 적은 SR은 가까운 쪽에
 # 두는 편이 안전하다(10% 반사 45m 대비 여유 2.2배 vs 1.7배).
+# 24×15로 줄면서 X중앙이 15 → 12. Y는 실외 설치와 같게 남 -2.0 / 북 17.0(필드 경계에서 각 2 m).
+# 두 센서 모두 코너까지 12.1~20.4m (이전 판 최대 26.3m) — 최장거리가 5.9m
+# 짧아져 표적당 점이 약 1.7배 늘어난다.
 LIDARS = [
     # (name, topic, x, y, z, roll, pitch, yaw, variant)
-    ("ground_lidar_1", "/lidar1", 15.0, -1.5, 2.0, 0.0, 0.0,  1.5708, "OS1-SR"),  # 남쪽, 필드중앙X, 북향
-    ("ground_lidar_2", "/lidar2", 15.0, 21.5, 2.0, 0.0, 0.0, -1.5708, "OS1"),     # 북쪽, 필드중앙X, 남향
+    ("ground_lidar_1", "/lidar1", 12.0, -2.0, 2.0, 0.0, 0.0,  1.5708, "OS1-SR"),  # 남쪽, 필드중앙X, 북향
+    ("ground_lidar_2", "/lidar2", 12.0, 17.0, 2.0, 0.0, 0.0, -1.5708, "OS1"),     # 북쪽, 필드중앙X, 남향
 ]
 
 # GUI에 LiDAR 레이(파란 부채꼴)를 그릴지 여부.
@@ -113,7 +138,46 @@ LIDARS = [
 # 레이를 꺼도 포인트클라우드 발행에는 전혀 영향이 없다 — 측위 동작은 동일하고,
 # 점을 보고 싶으면 RViz2의 /lidar1,2/points 를 쓰면 된다.
 # 센서 방향을 눈으로 확인해야 할 때만 잠깐 True로 바꿔 재생성할 것.
-LIDAR_VISUALIZE = True
+# 2026-08-18: True로 두고 비행했더니 스캔이 통째로 건너뛰었다. 스캔 간격
+# 중앙값은 정확히 100ms(=10Hz)인데 평균 도착률은 6.0/5.1Hz — 주기가 느린 게
+# 아니라 프레임이 빠지는 것이라, Gazebo가 레이 렌더링을 못 따라간 것으로 본다.
+# 측위는 포인트클라우드만 쓰므로 꺼도 동작에 영향이 없다.
+# 센서 방향을 눈으로 확인할 때만 잠깐 True로 바꿔 재생성할 것.
+LIDAR_VISUALIZE = False
+
+# 스캔 해상도. OS1-128의 실제 모드는 1024x10Hz / 2048x10Hz / 1024x20Hz 등이고,
+# 실기체는 1024를 쓰므로 시뮬도 1024로 맞춘다.
+# 1024x128 x 2대 = 262,144레이/프레임. 2026-08에는 드론이 뜨면 5.5~7Hz로 프레임이
+# 빠져서(HEADLESS=1도 동일) 원인을 가르려고 한동안 512로 낮춰 썼다.
+# 2026-09-28 1024 녹화(bags_1024 L1~L5)는 두 LiDAR 모두 10.00Hz로 손실이 없어
+# 1024를 기본으로 되돌렸다. 프레임이 다시 빠지면 녹화 후 간격부터 확인할 것.
+LIDAR_HSAMPLES = 1024
+LIDAR_VSAMPLES = 128
+LIDAR_VHALF = 0.37001      # 수직 FOV 절반 [rad] (±21.2°)
+LIDAR_NOISE = 0.005        # gaussian stddev [m]
+LIDAR_CHANNELS = 128
+WORLD_NAME = "competition_map"
+
+# 센서 프로필 선택. 기본(OS1)은 위 값 그대로 competition_map.sdf를 만든다.
+#   LIDAR_PROFILE=OS0 python3 generate_competition_map.py
+# 로 돌리면 두 센서를 OS0 64ch로 바꾼 competition_map_os0.sdf를 따로 만든다
+# (OS1 world는 안 건드림). 배치(위치·자세)는 동일 — 센서 사양만 바뀐다.
+# OS0는 1024x64x2 = 131,072레이/프레임으로 OS1(1024x128x2)의 절반 부하다.
+# 빔 배치는 균일(90.8°/64ch). PX4는 PX4_GZ_WORLD 값을 파일명과 world 이름
+# 둘 다로 쓰므로 world 이름도 파일명과 맞춘다(make_delayed_lidar2.py 참고) —
+# 참값 토픽이 /world/competition_map_os0/dynamic_pose/info 로 바뀐다.
+LIDAR_PROFILE = os.environ.get("LIDAR_PROFILE", "OS1").strip().upper()
+if LIDAR_PROFILE == "OS0":
+    LIDARS = [(*row[:8], "OS0") for row in LIDARS]
+    LIDAR_HSAMPLES = 1024
+    LIDAR_VSAMPLES = 64
+    LIDAR_VHALF = 0.79238      # ±45.4° (수직 FOV 90.8°)
+    LIDAR_NOISE = 0.008
+    LIDAR_CHANNELS = 64
+    WORLD_NAME = "competition_map_os0"
+elif LIDAR_PROFILE != "OS1":
+    raise SystemExit(f"LIDAR_PROFILE={LIDAR_PROFILE!r} — OS1, OS0만 지원")
+SENSOR_LABEL = f"{'OS0' if LIDAR_PROFILE == 'OS0' else 'OS1'}-{LIDAR_CHANNELS}"
 
 # ---------------------------------------------------------------------------
 # 1) ArUco 마커 모델 생성 (PNG + model.config/model.sdf) — OS0-SR 버전과 좌표 동일,
@@ -191,21 +255,23 @@ def marker_includes() -> str:
     return "".join(parts)
 
 
-def lidar_models() -> str:
-    """지상 고정 gpu_lidar 2대를 world에 인라인으로 삽입.
+def _lidar_model_block(name, topic, x, y, z, roll, pitch, yaw, variant) -> str:
+    """센서 한 대 분량의 <model> 블록.
 
-    각 모델: 지지대 기둥(바닥→센서) + 청색 하우징(OS0-SR의 주황과 구분) + 흰 캡
+    지지대 기둥(바닥→센서) + 청색 하우징(OS0-SR의 주황과 구분) + 흰 캡
     + gpu_lidar 센서. 센서 스펙은 Ouster OS1 128ch 등가 (수평 360°/1024,
     수직 ±21.2°/128, 10Hz, gaussian noise 0.5cm). 사거리만 변종별로 다르며
     LIDAR_VARIANTS에서 가져온다.
+
+    world에 정적으로 넣을 때와, 나중에 spawn_delayed_lidar.py로 실행 중인
+    시뮬레이션에 끼워넣을 때(고정 위상차 실험) 둘 다 이 함수를 쓴다 — 센서
+    스펙이 갈라지면 위상차 말고 다른 게 같이 달라져 실험이 오염된다.
     """
-    parts = []
-    for name, topic, x, y, z, roll, pitch, yaw, variant in LIDARS:
-        rng = LIDAR_VARIANTS[variant]
-        pole_len = z
-        pole_cz = -z / 2.0
-        parts.append(f'''
-    <!-- 지상 고정 LiDAR({variant} 128ch): {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
+    rng = LIDAR_VARIANTS[variant]
+    pole_len = z
+    pole_cz = -z / 2.0
+    return f'''
+    <!-- 지상 고정 LiDAR({variant} {LIDAR_CHANNELS}ch): {name} @ world ({x}, {y}, {z}), yaw={yaw} rad, topic {topic}/points -->
     <model name="{name}">
       <static>true</static>
       <pose>{x} {y} {z} {roll} {pitch} {yaw}</pose>
@@ -250,16 +316,16 @@ def lidar_models() -> str:
           <lidar>
             <scan>
               <horizontal>
-                <samples>1024</samples>
+                <samples>{LIDAR_HSAMPLES}</samples>
                 <resolution>1</resolution>
                 <min_angle>-3.14159265358979</min_angle>
                 <max_angle>3.14159265358979</max_angle>
               </horizontal>
               <vertical>
-                <samples>128</samples>
+                <samples>{LIDAR_VSAMPLES}</samples>
                 <resolution>1</resolution>
-                <min_angle>-0.37001</min_angle>
-                <max_angle>0.37001</max_angle>
+                <min_angle>{-LIDAR_VHALF}</min_angle>
+                <max_angle>{LIDAR_VHALF}</max_angle>
               </vertical>
             </scan>
             <range>
@@ -270,13 +336,44 @@ def lidar_models() -> str:
             <noise>
               <type>gaussian</type>
               <mean>0.0</mean>
-              <stddev>0.005</stddev>
+              <stddev>{LIDAR_NOISE}</stddev>
             </noise>
           </lidar>
         </sensor>
       </link>
-    </model>''')
+    </model>'''
+
+
+# 고정 위상차 실험에서 world에 넣지 않고 나중에 스폰할 센서 이름.
+# 비워두면(기본값) 기존과 동일하게 둘 다 정적으로 world에 들어간다.
+DELAYED_LIDAR_NAMES: set[str] = set()
+
+
+def lidar_models() -> str:
+    """DELAYED_LIDAR_NAMES에 없는 센서만 world에 인라인으로 삽입."""
+    parts = [
+        _lidar_model_block(name, topic, x, y, z, roll, pitch, yaw, variant)
+        for name, topic, x, y, z, roll, pitch, yaw, variant in LIDARS
+        if name not in DELAYED_LIDAR_NAMES
+    ]
     return "".join(parts)
+
+
+def write_delayed_lidar_sdf(name: str, out_path: str) -> None:
+    """DELAYED_LIDAR_NAMES에 든 센서 하나를 독립 스폰용 SDF 파일로 쓴다.
+
+    spawn_delayed_lidar.py가 실행 중인 시뮬레이션에 이 파일을 끼워넣는다.
+    world 파일과 정확히 같은 _lidar_model_block()을 쓰므로, 나중에 붙는
+    센서라는 것 말고는 스펙이 하나도 안 갈린다.
+    """
+    entry = next((row for row in LIDARS if row[0] == name), None)
+    if entry is None:
+        raise ValueError(f'LIDARS에 {name!r}가 없습니다')
+    block = _lidar_model_block(*entry)
+    sdf = f'<sdf version="1.9">{block}\n</sdf>\n'
+    with open(out_path, 'w') as f:
+        f.write(sdf)
+    print(f'지연 스폰용 SDF 생성: {out_path}  (모델 {name})')
 
 
 def coordinate_comment_block() -> str:
@@ -297,7 +394,7 @@ def coordinate_comment_block() -> str:
 # ---------------------------------------------------------------------------
 world = f'''<?xml version="1.0" encoding="UTF-8"?>
 <sdf version="1.9">
-  <world name="competition_map">
+  <world name="{WORLD_NAME}">
 {coordinate_comment_block()}
 
     <physics type="ode">
@@ -405,7 +502,7 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
     <!-- 경로점 ArUco 마커 4개 (DICT_4X4_50, 0.5m x 0.5m), 경계에서 1셀 이상 안쪽 -->
 {marker_includes()}
 
-    <!-- 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용, 33x23 금지구역 밖) -->
+    <!-- 지상 고정 LiDAR 2대 ({SENSOR_LABEL}, 호버 구간 전용, 33x23 금지구역 밖) -->
 {lidar_models()}
 
     <light name="sunUTC" type="directional">
@@ -439,7 +536,7 @@ world = f'''<?xml version="1.0" encoding="UTF-8"?>
 </sdf>
 '''
 
-out_sdf = os.path.join(WORLDS_DIR, "competition_map.sdf")
+out_sdf = os.path.join(WORLDS_DIR, f"{WORLD_NAME}.sdf")
 with open(out_sdf, "w") as f:
     f.write(world)
 print(f"\nworld 파일 생성: {out_sdf}")
@@ -447,7 +544,7 @@ print(f"\nworld 파일 생성: {out_sdf}")
 # ---------------------------------------------------------------------------
 # 4) 좌표 텍스트 파일 (라인트레이싱/정답 비교용)
 # ---------------------------------------------------------------------------
-out_txt = os.path.join(WORLDS_DIR, "competition_map_coordinates.txt")
+out_txt = os.path.join(WORLDS_DIR, f"{WORLD_NAME}_coordinates.txt")
 with open(out_txt, "w") as f:
     f.write("제24회 한국로봇항공기경연대회 중급부문 - competition_map 좌표 목록\n")
     f.write(f"임무구역: {AREA_X}m x {AREA_Y}m, 원점(0,0)=이착륙 지점\n")
@@ -467,7 +564,7 @@ with open(out_txt, "w") as f:
     for name, (marker_id, x, y) in zip(marker_model_names, markers):
         f.write(f"  id={marker_id}  (x={x}, y={y})  model={name}\n")
 
-    f.write("\n=== 지상 고정 LiDAR 2대 (OS1-128, 호버 구간 전용) ===\n")
+    f.write(f"\n=== 지상 고정 LiDAR 2대 ({SENSOR_LABEL}, 호버 구간 전용) ===\n")
     for name, topic, x, y, z, roll, pitch, yaw, variant in LIDARS:
         rng = LIDAR_VARIANTS[variant]
         f.write(f"  {name}  world=({x}, {y}, {z})  yaw={yaw} rad  "

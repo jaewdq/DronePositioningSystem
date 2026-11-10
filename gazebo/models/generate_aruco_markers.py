@@ -40,12 +40,23 @@ model.sdf 안에서 텍스처는 다음과 같이 연결된다:
 인식된다.
 """
 
+import glob
 import os
+import shutil
 
-import cv2
-import numpy as np
+# cv2는 마커 PNG를 **처음 만들 때만** 필요하다. 패턴은 marker_id에만 의존하고
+# 좌표와 무관하므로, 이미 만들어둔 같은 ID의 PNG가 있으면 복사해서 쓴다.
+# 맵 좌표가 바뀌면 디렉토리 이름은 달라지지만 이미지는 그대로다.
+# (여기서 cv2를 무조건 import하면, cv2가 numpy와 ABI가 안 맞는 환경에서
+#  맵 생성 자체가 막힌다 — 실제로 numpy 2.2.6 + 구 opencv에서 그랬다.)
+try:
+    import cv2
+    _CV2_ERR = None
+except Exception as e:                              # noqa: BLE001
+    cv2 = None
+    _CV2_ERR = e
 
-ARUCO_DICTIONARY = cv2.aruco.DICT_4X4_50
+ARUCO_DICTIONARY = 0 if cv2 is None else cv2.aruco.DICT_4X4_50
 MARKER_SIZE_M = 0.5        # 실제 마커 한 변 길이 (50cm)
 MARKER_PIXELS = 300        # 마커 패턴 자체의 텍스처 해상도
 BORDER_PIXELS = 50         # 흰색 여백(quiet zone) 두께, 인식률을 위해 필요
@@ -64,21 +75,40 @@ def model_name(marker_id: int, x: float, y: float) -> str:
     return f"aruco_marker_id{marker_id}_at_x{round(x)}_y{round(y)}"
 
 
+def _write_marker_png(models_dir: str, model_dir: str, marker_id: int) -> None:
+    """마커 PNG를 만든다. 같은 ID의 기존 PNG가 있으면 복사, 없으면 cv2로 생성.
+
+    좌표만 바뀐 맵 갱신에서는 복사 경로를 타므로 cv2가 필요 없다."""
+    dest = os.path.join(model_dir, "marker.png")
+    for src in sorted(glob.glob(os.path.join(
+            models_dir, f"aruco_marker_id{marker_id}_at_*", "marker.png"))):
+        if os.path.abspath(src) != os.path.abspath(dest):
+            shutil.copyfile(src, dest)
+            return
+
+    if cv2 is None:
+        raise RuntimeError(
+            f"id{marker_id}의 기존 marker.png가 없고 cv2도 못 씁니다 ({_CV2_ERR}).\n"
+            "  새 마커를 만들려면 opencv를 numpy와 맞는 버전으로 설치하세요:\n"
+            "    pip3 install -U 'opencv-python>=4.10'")
+
+    import numpy as np
+    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY)
+    marker_img = cv2.aruco.generateImageMarker(aruco_dict, marker_id, MARKER_PIXELS)
+    total_px = MARKER_PIXELS + 2 * BORDER_PIXELS
+    canvas = np.full((total_px, total_px), 255, dtype=np.uint8)
+    canvas[BORDER_PIXELS:BORDER_PIXELS + MARKER_PIXELS,
+           BORDER_PIXELS:BORDER_PIXELS + MARKER_PIXELS] = marker_img
+    cv2.imwrite(dest, cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGRA))
+
+
 def generate_marker(models_dir: str, marker_id: int, x: float, y: float) -> str:
     """marker_id용 PNG + model.config + model.sdf를 만들고 모델 디렉토리명을 반환한다."""
     name = model_name(marker_id, x, y)
     model_dir = os.path.join(models_dir, name)
     os.makedirs(model_dir, exist_ok=True)
 
-    aruco_dict = cv2.aruco.getPredefinedDictionary(ARUCO_DICTIONARY)
-    marker_img = cv2.aruco.generateImageMarker(aruco_dict, marker_id, MARKER_PIXELS)
-
-    total_px = MARKER_PIXELS + 2 * BORDER_PIXELS
-    canvas = np.full((total_px, total_px), 255, dtype=np.uint8)
-    canvas[BORDER_PIXELS:BORDER_PIXELS + MARKER_PIXELS,
-           BORDER_PIXELS:BORDER_PIXELS + MARKER_PIXELS] = marker_img
-    rgba = cv2.cvtColor(canvas, cv2.COLOR_GRAY2BGRA)
-    cv2.imwrite(os.path.join(model_dir, "marker.png"), rgba)
+    _write_marker_png(models_dir, model_dir, marker_id)
 
     with open(os.path.join(model_dir, "model.config"), "w") as f:
         f.write(f"""<?xml version="1.0"?>
