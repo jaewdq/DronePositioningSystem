@@ -60,8 +60,8 @@ SERIES_2 = '#eb6834'   # orange — 이동
 SERIES_3 = '#1baf7a'   # aqua   — 수직오차
 
 # 필드 사양 (generate_competition_map.py 와 동일하게 유지)
-AREA_X, AREA_Y = 30.0, 20.0
-N_CELLS_X, N_CELLS_Y = 7, 5
+AREA_X, AREA_Y = 24.0, 15.0
+N_CELLS_X, N_CELLS_Y = 8, 5    # 3.0m 격자
 
 
 def _fix_mpl_toolkits():

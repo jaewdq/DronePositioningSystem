@@ -20,6 +20,10 @@ complete CSV.
 덮어썼기 때문에, 비행 후 archive_run을 깜빡하고 recorder를 다시 켜면
 직전 비행 데이터가 사라졌다.
 
+runNNN 번호는 **비행 하나에 하나만** 나간다. 추정 표본이 min_est_samples에
+못 미치는 기록(착륙 후 Ctrl+C까지의 몇 초, 트래커 없이 돌린 구간)은 번호를
+받지 못하고 _discarded/ 에 한 벌만 남는다.
+
 Usage:
   ros2 run drone_localization flight_recorder
   # ... fly the mission (competition_mission) ...
@@ -176,6 +180,16 @@ class FlightRecorder(Node):
         if n_act == 0 and n_est == 0:
             return None  # 보관할 게 없음 (첫 실행이거나 이미 옮겨감)
 
+        # 비행 하나에 폴더 하나. 이 검사가 없던 시절에는 한 줄만 있어도
+        # run 번호를 줬는데, 착륙을 감지해 보관한 뒤에도 레코더는 계속
+        # 기록하므로 Ctrl+C까지의 몇 초가 곧바로 다음 run이 됐다(run055,
+        # run057이 그렇게 생긴 3초짜리다). 트래커를 안 띄우고 돌린 구간도
+        # 마찬가지로 추정이 빈 채 번호만 차지한다(run053). 그러면 나중에
+        # 어느 게 진짜 비행인지 폴더 이름만으로는 알 수 없다.
+        # _check_flight_end와 같은 기준으로 거른다.
+        if n_est < self.min_est_samples:
+            return self._discard(n_act, n_est)
+
         dest = self._next_run_dir()
         os.makedirs(dest, exist_ok=True)
         for src in (self._actual_path, self._est_path):
@@ -186,6 +200,25 @@ class FlightRecorder(Node):
             f'이전 기록을 자동 보관했습니다 → {dest} '
             f'(실측 {n_act}, 추정 {n_est}표본)')
         return dest
+
+    def _discard(self, n_act, n_est):
+        """비행으로 볼 수 없는 자투리 — run 번호는 주지 않는다.
+
+        그렇다고 바로 지우지도 않는다. 추정이 비는 흔한 이유가 '트래커를
+        안 띄웠다'인데 그 경우 실측 쪽은 멀쩡하고, 길게 돌린 기록이면
+        아깝다. 한 벌만 _discarded/에 남기고 다음 자투리가 나오면 덮어쓴다.
+        run(\\d+) 패턴이 아니라서 run 번호 매기기에도 끼어들지 않는다."""
+        dest = os.path.join(self.out_dir, '_discarded')
+        shutil.rmtree(dest, ignore_errors=True)
+        os.makedirs(dest, exist_ok=True)
+        for src in (self._actual_path, self._est_path):
+            if os.path.isfile(src):
+                shutil.move(src, os.path.join(dest, os.path.basename(src)))
+
+        self.get_logger().info(
+            f'비행으로 보기 어려워 run 번호를 주지 않았습니다 '
+            f'(실측 {n_act}, 추정 {n_est}표본 < {self.min_est_samples}) → {dest}')
+        return None      # None이므로 시각화도 안 뜬다
 
     # ------------------------------------------------------------------
     # 비행 종료 감지 → 보관 + 시각화 자동 실행

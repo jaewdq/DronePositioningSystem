@@ -32,9 +32,9 @@ import os
 import numpy as np
 
 # 필드 사양 (generate_competition_map.py와 동일하게 유지할 것)
-AREA_X = 30.0
-AREA_Y = 20.0
-N_CELLS_X = 7
+AREA_X = 24.0
+AREA_Y = 15.0
+N_CELLS_X = 8      # 3.0m 격자
 N_CELLS_Y = 5
 
 # ---------------------------------------------------------------------------
@@ -159,14 +159,14 @@ def _default_params_path():
     try:
         from ament_index_python.packages import get_package_share_directory
         share = get_package_share_directory('drone_localization')
-        cand = os.path.join(share, 'params', 'lidar_localization.yaml')
+        cand = os.path.join(share, 'params', 'lidar_localization_cov.yaml')
         if os.path.isfile(cand):
             return cand
     except Exception:
         pass
     return os.path.expanduser(
         '~/drone_project/DronePositioningSystem/ros2_ws/src/drone_localization/'
-        'params/lidar_localization.yaml')
+        'params/lidar_localization_cov.yaml')
 
 
 def _style_axes(ax):

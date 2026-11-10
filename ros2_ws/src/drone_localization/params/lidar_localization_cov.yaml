@@ -1,0 +1,143 @@
+# 논문 실험 조건 (24 x 15 필드) — lidar_drone_tracker_cov 의 기본 설정.
+#
+# 논문 표 1·최종본과 같은 값이다. 실제 운용 저장소(jaewdq/LidarDronePositioning)의
+# lidar_localization_os1.yaml 도 동작 파라미터는 이 파일과 같고, 센서 pose·마커·홈
+# 좌표만 현장 값이다. 트래커 코드는 두 저장소가 같은 파일이다.
+#
+#   1) 필드 기하는 competition_map_coordinates.txt(= 월드 생성기의 정답)를 따른다.
+#      임무구역 24.0 x 15.0m, 원점(0,0) = 이착륙 지점.
+#   2) 논문 PF/MF/SU 비교 재생(flight_logs/paper_1024)은 이 파일에 fusion_mode 만
+#      바꿔 넣었다: PF cloud, MF position, SU sequential (PF/MF는 process_on_arrival true).
+#
+# 사용 (launch 기본값):
+#   ros2 launch drone_localization lidar_localization.launch.py [fusion_mode:=position]
+
+lidar_drone_tracker:
+  ros__parameters:
+
+    # --- 센서 외부 파라미터 -------------------------------------------------
+    # generate_competition_map.py의 LIDARS 테이블과 같아야 한다. 월드를 그 테이블로
+    # 생성하므로 시뮬에서는 이 값이 오차 없는 참값이다.
+    lidar1_topic: "/lidar1/points"
+    lidar1_x:     12.0
+    lidar1_y:     -2.0
+    lidar1_z:      2.0
+    lidar1_roll:   0.0
+    lidar1_pitch:  0.0
+    lidar1_yaw:    1.5708     # 남쪽에서 필드중심(12,7.5)을 봄
+    lidar2_topic: "/lidar2/points"
+    lidar2_x:     12.0
+    lidar2_y:     17.0
+    lidar2_z:      2.0
+    lidar2_roll:   0.0
+    lidar2_pitch:  0.0
+    lidar2_yaw:   -1.5708     # 북쪽에서 필드중심(12,7.5)을 봄
+
+    # 실기에서는 Kabsch/SVD 캘리브의 잔차를 넣는 항이다. 시뮬은 외부 파라미터가
+    # 참값이므로 0으로 둔다 — 이 항을 0.05로 남겨두면 시뮬에 없는 오차를
+    # 공분산에 얹어 A/B/C와의 비교가 D에게 불리해진다.
+    # (공분산이 지나치게 낙관적으로 가는 것은 min_detection_std가 막는다.)
+    lidar1_extrinsic_rmse: 0.0
+    lidar2_extrinsic_rmse: 0.0
+    # 위 pose가 시뮬의 참값이므로 "nominal 쓰고 있다" 경고는 의미가 없다.
+    warn_nominal_extrinsics: false
+
+    world_frame: "map"        # A/B/C가 frame_id='map'으로 하드코딩돼 있어 맞춘다
+
+    # --- 타이밍 -------------------------------------------------------------
+    lidar_update_rate: 10.0
+    buffer_stale_timeout: 0.25   # A와 동일
+    queue_depth: 8
+    # 실외 운용(PTP)과 같은 10 ms. 시뮬의 두 센서는 같은 시각에 스캔하므로
+    # (위상 차 0 ms) 모든 짝이 허용치 안에 든다.
+    sync_tolerance_sec: 0.010
+    sync_stats_window: 200
+
+    # --- 융합 ---------------------------------------------------------------
+    # sequential = SU(기본), position = MF, cloud = PF. launch 인자가 이 값보다 우선한다.
+    fusion_mode: "sequential"
+    # PF/MF가 짝 스캔이 도착하는 즉시 처리한다 (논문 조건).
+    process_on_arrival: true
+    sensor_agreement_dist: 0.35
+
+    # --- ROI (A와 동일) -----------------------------------------------------
+    roi_x_min: -1.0
+    roi_x_max: 25.0
+    roi_y_min: -1.0
+    roi_y_max: 16.0
+    roi_z_min:  0.8
+    roi_z_max:  4.0
+    remove_boundary_surfaces: false
+    boundary_surface_margin: 0.10
+
+    # --- 배경 제거 ----------------------------------------------------------
+    # 시뮬에는 학습해 둘 정적 배경(.npz)이 없고, 애초에 정적 잡음도 없다.
+    use_background: false
+    learn_background: false
+    background_frames: 200
+    background_voxel_size: 0.05
+    background_distance: 0.08
+    background_min_observation_ratio: 0.70
+
+    # --- 전처리 (A와 동일) --------------------------------------------------
+    voxel_leaf_size: 0.05
+    sor_mean_k:    0
+    sor_std_ratio:  2.0
+
+    # --- 클러스터링 ---------------------------------------------------------
+    # eps/최소점수는 A와 맞춘다. 단 D는 센서별로 따로 군집화하므로 한 클러스터에
+    # 들어오는 점이 A의 절반 수준(실측 센서당 중앙값 6점)이라는 점은 감안해야 한다.
+    cluster_tolerance:  0.40
+    cluster_min_points: 3
+    cluster_max_points: 400
+    cluster_max_extent: 1.20
+    cluster_min_extent: 0.02   # A에 없는 하한. 원본 기본값 유지.
+
+    # --- 측정 공분산 (D의 핵심, 원본 기본값 유지) ---------------------------
+    meas_noise_pos: 0.10        # 공분산을 못 만들 때의 폴백
+    centroid_noise_floor: 0.025
+    range_noise_per_meter: 0.002
+    min_detection_std: 0.03
+    max_detection_std: 0.50
+
+    # --- 칼만필터 -----------------------------------------------------------
+    # 세 트래커 공통의 연속 백색 가속도 Q. 0.4 = σ_a² × 0.1 s (σ_a = 2 m/s²).
+    process_noise_q: 0.4
+    seed_at_home: true
+    home_x: 0.0                 # 원점 = 이착륙 지점
+    home_y: 0.0
+    home_z: 2.0                 # 호버 고도. A와 동일
+    home_seed_std: 0.50
+
+    # --- 연관 게이트 / 코스팅 (A와 동일) ------------------------------------
+    max_assoc_dist: 2.0
+    gate_sigma_k: 3.0
+    max_assoc_dist_cap: 4.0
+    coast_max_frames: 15
+    reset_after_frames: 50
+
+    # --- 경로점 검출 --------------------------------------------------------
+    # 게이트 반경은 A와 동일한 4.5m. 마커 좌표는 A의 yaml이 옛 30x20 필드 값을
+    # 그대로 들고 있어(4.2857/16.0/25.7143 — 24x15 필드 밖) 따라 쓰지 않고,
+    # competition_map_coordinates.txt의 실제 ArUco 4개를 쓴다.
+    enable_waypoint_tracking: true
+    waypoint_gate_radius: 4.5
+    waypoint_speed_threshold: 0.25
+    waypoint_min_frames: 4
+    waypoint_grace_frames: 5
+    marker1_x:  3.0
+    marker1_y:  3.0
+    marker2_x:  3.0
+    marker2_y: 12.0
+    marker3_x: 21.0
+    marker3_y:  3.0
+    marker4_x:  9.0
+    marker4_y:  9.0
+
+    # --- 디버그 발행 --------------------------------------------------------
+    # 센서별 클라우드/pose는 RViz에서 두 센서 불일치를 바로 보게 해준다.
+    # 비교 런을 돌릴 때 부하가 거슬리면 꺼라.
+    publish_world_clouds: false
+    publish_filtered_clouds: true
+    debug_timing: false
+    debug_timing_period: 2.0

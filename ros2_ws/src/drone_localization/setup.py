@@ -25,16 +25,15 @@ setup(
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'lidar_drone_tracker = drone_localization.lidar_drone_tracker:main',
-            'lidar_drone_tracker_fusion = drone_localization.lidar_drone_tracker_fusion:main',
+            'lidar_drone_tracker_cov = drone_localization.lidar_drone_tracker_cov:main',
             'flight_recorder = drone_localization.flight_recorder:main',
             'plot_flight = drone_localization.plot_flight:main',
             'analyze_waypoints = drone_localization.analyze_waypoints:main',
             'plot_flight_3d = drone_localization.plot_flight_3d:main',
             'evaluate_accuracy = drone_localization.evaluate_accuracy:main',
             'plot_accuracy = drone_localization.plot_accuracy:main',
-            'compare_fusion = drone_localization.compare_fusion:main',
             'archive_run = drone_localization.archive_run:main',
+            'replay_bag = drone_localization.replay_bag:main',
         ],
     },
 )

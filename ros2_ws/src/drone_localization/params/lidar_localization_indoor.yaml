@@ -1,0 +1,133 @@
+# 실내 그물 케이지 맵 (indoor_cage) — OS0-SR 64ch 2대, 삼각대. 변형 D(cov) 기준.
+#
+# 필드 기하는 gazebo/worlds/indoor_cage_coordinates.txt(= generate_indoor_cage.py의 정답)를 따른다.
+#   원점(0,0) = 필드 남서 모서리 = 이륙 지점
+#   필드 3 x 2 m (x 0~3, y 0~2), 그물 케이지 5 x 4 m (x -1~4, y -1~3)
+#   추적 범위: 이착륙(z=0)부터 3 m까지 전 구간
+# 대회 맵(lidar_localization_cov.yaml)과 다른 값에만 이유를 적었다.
+#
+# 사용:
+#   PX4_GZ_NO_FOLLOW=1 PX4_GZ_WORLD=indoor_cage make px4_sitl gz_x500
+#   ros2 launch drone_localization lidar_localization.launch.py \
+#       tracker:=lidar_drone_tracker_cov params_file:=lidar_localization_indoor.yaml
+
+lidar_drone_tracker:
+  ros__parameters:
+
+    # --- 센서 외부 파라미터 -------------------------------------------------
+    # generate_indoor_cage.py의 LIDARS와 같아야 한다 (자동 동기화 없음).
+    lidar1_topic: "/lidar1/points"
+    # 긴 변 가운데 배치 (기본, 2026-10-27 확정). 그물에서 0.3 m 안쪽, 높이 1.2 m.
+    # 보관 중인 짧은 변 배치(LIDAR_LAYOUT=short)로 돌릴 때는 아래 값으로 바꾼다:
+    #   lidar1 (-0.8, 1.0, 1.2) yaw 0.0      /  lidar2 (3.8, 1.0, 1.2) yaw 3.1416
+    lidar1_x:      1.5
+    lidar1_y:     -0.7
+    lidar1_z:      1.2
+    lidar1_roll:   0.0
+    lidar1_pitch:  0.0
+    lidar1_yaw:    1.5708     # 남쪽(긴 변) 삼각대, 북향
+    lidar2_topic: "/lidar2/points"
+    lidar2_x:      1.5
+    lidar2_y:      2.7
+    lidar2_z:      1.2
+    lidar2_roll:   0.0
+    lidar2_pitch:  0.0
+    lidar2_yaw:   -1.5708     # 북쪽(긴 변) 삼각대, 남향
+
+    # 시뮬은 외부 파라미터가 참값. 실측 배치로 옮기면 캘리브 잔차를 넣을 것.
+    lidar1_extrinsic_rmse: 0.0
+    lidar2_extrinsic_rmse: 0.0
+    warn_nominal_extrinsics: false
+
+    world_frame: "map"
+
+    # --- 타이밍 -------------------------------------------------------------
+    lidar_update_rate: 10.0
+    buffer_stale_timeout: 0.25
+    queue_depth: 8
+    sync_tolerance_sec: 0.010
+    sync_stats_window: 200
+
+    # --- 융합 ---------------------------------------------------------------
+    # 시뮬 라이브 기본은 SU(순차 갱신). Gazebo 는 두 센서를 차례로 처리해 두 스캔이 다른
+    # 시각에 도착하므로 SU 가 유리하다. (실기는 위상 고정이라 MF = SU, 실기 기본은 MF.)
+    #   cloud = PF(점군 융합), position = MF(관측 융합), sequential = SU(순차 갱신)
+    # PF/MF/SU 비교 재생(compare_fusion.sh, paper_replicate.sh)은 방식을 직접 지정하므로 무관하다.
+    fusion_mode: "sequential"
+    # 짝 스캔이 도착하는 즉시 처리 (PF/MF용, false면 다음 10 Hz 타이머까지 최대 0.1 s 기다린다).
+    # 논문 PF/MF 재생 조건(one_replay_state.sh, compare_fusion.sh)과 같게 맞춘다.
+    process_on_arrival: true
+    sensor_agreement_dist: 0.35
+
+    # --- ROI ----------------------------------------------------------------
+    # XY: 필드 + 0.3 m (y는 0.2 m). 삼각대와 그물·기둥(x=-1, 4 / y=-1, 3)은 밖으로 잘린다.
+    #     긴 변 배치(y=-0.7, 2.7)의 필드 쪽 다리 끝이 y=-0.3, 2.3까지 오므로 y는 0.2 m만 둔다.
+    # Z: 이착륙까지 보려고 바닥 바로 위(0.10 m)부터. 바닥 점은 σ=8 mm 잡음이라
+    #    0.10 m면 12σ 위다. 실측 바닥은 평평하지 않을 수 있으니 캘리브의 지면
+    #    평면 잔차를 보고 올릴 것. 상한은 최대 고도 3 m + 0.3 m.
+    roi_x_min: -0.3
+    roi_x_max:  3.3
+    roi_y_min: -0.2
+    roi_y_max:  2.2
+    roi_z_min:  0.10
+    roi_z_max:  3.3
+    remove_boundary_surfaces: false
+    boundary_surface_margin: 0.10
+
+    # --- 배경 제거 ----------------------------------------------------------
+    # 시뮬에는 정적 잡음이 없다. 실측 케이지에서는 그물 처짐·바닥 물체가 ROI에
+    # 들어올 수 있으니 그때 배경 학습을 켠다.
+    use_background: false
+    learn_background: false
+    background_frames: 200
+    background_voxel_size: 0.05
+    background_distance: 0.08
+    background_min_observation_ratio: 0.70
+
+    # --- 전처리 -------------------------------------------------------------
+    # 복셀 끔 (0.0). 24 x 15 m 필드(lidar_localization_cov.yaml)는 0.05 m 이고, 이 4 x 3 m
+    # 실내 필드에서는 기체 점이 적어 끄는 편이 나았다 (녹화 재생 비교, 2026-11). 실기와 같다.
+    voxel_leaf_size: 0.0
+    sor_mean_k:    0
+    sor_std_ratio:  2.0
+
+    # --- 클러스터링 ---------------------------------------------------------
+    # 논문 조건 (0.40 m / 3점 / 400점 / 1.2 m). 복셀을 꺼도 최대 400 은 유지한다:
+    # 실기 시범 5회에서 400 과 1500 의 결과가 같았다 (2026-11-05).
+    cluster_tolerance:  0.40
+    cluster_min_points: 3
+    cluster_max_points: 400
+    cluster_max_extent: 1.20
+    cluster_min_extent: 0.02
+
+    # --- 측정 공분산 --------------------------------------------------------
+    meas_noise_pos: 0.10
+    centroid_noise_floor: 0.025
+    range_noise_per_meter: 0.002
+    min_detection_std: 0.03
+    max_detection_std: 0.50
+
+    # --- 칼만필터 -----------------------------------------------------------
+    process_noise_q: 0.4
+    seed_at_home: true
+    home_x: 0.0                 # 이륙 지점 = 원점 (필드 남서 모서리)
+    home_y: 0.0
+    home_z: 0.15                # 패드 위에 앉은 기체 중심 높이 (호버 고도가 아님)
+    home_seed_std: 0.50
+
+    # --- 연관 게이트 / 코스팅 -----------------------------------------------
+    max_assoc_dist: 2.0
+    gate_sigma_k: 3.0
+    max_assoc_dist_cap: 4.0
+    coast_max_frames: 15
+    reset_after_frames: 50
+
+    # --- 경로점 검출 --------------------------------------------------------
+    # 이 맵에는 마커가 없다.
+    enable_waypoint_tracking: false
+
+    # --- 디버그 발행 --------------------------------------------------------
+    publish_world_clouds: false
+    publish_filtered_clouds: true
+    debug_timing: false
+    debug_timing_period: 2.0

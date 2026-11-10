@@ -24,3 +24,21 @@ competition_results/
 # 궤적 생성기 산출물 (generate_groundtruth_trajectory.py 가 만듦)
 groundtruth_trajectory.csv
 groundtruth_trajectory_preview.png
+
+# 생성물 — 생성 스크립트로 다시 만든다
+gazebo/worlds/indoor_cage_h[0-9][0-9][0-9]*
+gazebo/worlds/indoor_cage_*_h[0-9][0-9][0-9]*
+.pytest_cache/
+
+# 논문 원고·그림 (미발표 — 공개 저장소에 올리지 않는다)
+docs/PAPER_*
+docs/ABSTRACT_*
+docs/EQUATIONS_KO.md
+docs/METHODS_PIPELINE_ABC_KO.md
+docs/build_paper_docx.py
+docs/figures/
+docs/figures.zip
+*.docx
+
+# 논문 초기 실험 (experiments/indoor 로 대체됨, 타 팀 제출 로그 포함)
+experiments/paper/
