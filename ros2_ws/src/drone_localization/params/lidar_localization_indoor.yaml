@@ -108,7 +108,8 @@ lidar_drone_tracker:
     max_detection_std: 0.50
 
     # --- 칼만필터 -----------------------------------------------------------
-    process_noise_q: 0.4
+    # 가속도 잡음 세기 q [m^2/s^3]. 실기 실내 yaml 과 같게 0.1 (24 x 15 논문 조건은 0.4, lidar_localization_cov.yaml).
+    process_noise_q: 0.1
     seed_at_home: true
     home_x: 0.0                 # 이륙 지점 = 원점 (필드 남서 모서리)
     home_y: 0.0
